@@ -1,0 +1,43 @@
+# ==========================================
+# DATASET, SERIALIZED OBJECTS & LARGE FILES
+# ==========================================
+# Esclude i file originali grezzi e quelli puliti generati da Pandas
+dataset/RAW_recipes.csv
+dataset/RAW_interactions.csv
+dataset/clean_recipes.csv
+dataset/clean_interactions.csv
+
+# Esclude tutti i file Pickle (Modelli ML, matrici, dizionari serializzati)
+*.pkl
+*.pickle
+
+# Regola generale di sicurezza per file di dati pesanti
+*.csv
+*.zip
+*.tar.gz
+
+# ==========================================
+# PYTHON ENVIRONMENT & VIRTUAL ENVS
+# ==========================================
+# Esclude la cartella dell'ambiente virtuale
+venv/
+.venv/
+env/
+ENV/
+
+# Esclude i file precompilati di Python che appesantiscono la cronologia Git
+**/__pycache__/
+*.py[cod]
+*$py.class
+
+# ==========================================
+# VS CODE & IDE CONFIGURATIONS
+# ==========================================
+# Esclude le impostazioni locali di VS Code
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
