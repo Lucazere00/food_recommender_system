@@ -1,12 +1,20 @@
-PATH_RAW_RECIPES      = "dataset/RAW_recipes.csv"
-PATH_RAW_INTERACTIONS = "dataset/RAW_interactions.csv"
-PATH_CLEAN_RECIPES    = "dataset/clean_recipes.csv"
+# config.py
+PATH_RAW_RECIPES        = "dataset/RAW_recipes.csv"
+PATH_RAW_INTERACTIONS   = "dataset/RAW_interactions.csv"
+PATH_CLEAN_RECIPES      = "dataset/clean_recipes.csv"
 PATH_CLEAN_INTERACTIONS = "dataset/clean_interactions.csv"
+PATH_TFIDF_MATRIX       = "dataset/tfidf_matrix.npz"   # ← mancante
+PATH_SAVED_MODELS       = "models/saved/"               # ← mancante
 
-MIN_USER_INTERACTIONS = 5     # soglia per collaborative filtering
-MIN_RECIPE_RATINGS    = 10    # ricette con meno voti escluse dal CF
-TOP_K                 = 10    # numero di raccomandazioni restituite
-# Soglia massima di calorie per evitare errori e porzioni da banchetto
-MAX_CALORIES = 3500
+MIN_USER_INTERACTIONS   = 5
+MIN_RECIPE_RATINGS      = 10
+TOP_K                   = 10
+MAX_CALORIES            = 3500
 
-OPENAI_API_KEY = "sk-..."     # solo se usi LLM — altrimenti lascia vuoto
+# CF hyperparameters — centralizzati per l'ablation study
+SVD_N_FACTORS   = 50
+SVD_N_EPOCHS    = 20
+SVD_LR_ALL      = 0.005
+
+OPENAI_API_KEY  = "sk-..."
+GROQ_API_KEY    = "tuo_api_key_qui"

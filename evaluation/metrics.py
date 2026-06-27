@@ -1,15 +1,15 @@
 import numpy as np
 import pandas as pd
 
+
 def calculate_rmse_mae(predictions):
     """
-    Calcola RMSE e MAE per le predizioni numeriche del filtro collaborativo.
-    predictions: lista di oggetti Prediction di scikit-surprise, oppure lista di tuple (voto_reale, voto_predetto)
+    Calcola RMSE e MAE per le predizioni del filtro collaborativo.
+    predictions: lista di oggetti Prediction di scikit-surprise
+                 oppure lista di tuple (voto_reale, voto_predetto).
     """
-    actuals = []
-    preds = []
-    
-    # Gestiamo sia oggetti di Surprise sia tuple classiche
+    actuals, preds = [], []
+
     for p in predictions:
         if hasattr(p, 'r_ui') and hasattr(p, 'est'):
             actuals.append(p.r_ui)
@@ -17,77 +17,101 @@ def calculate_rmse_mae(predictions):
         else:
             actuals.append(p[0])
             preds.append(p[1])
-            
+
     actuals = np.array(actuals)
-    preds = np.array(preds)
-    
+    preds   = np.array(preds)
+
     rmse = np.sqrt(np.mean((actuals - preds) ** 2))
-    mae = np.mean(np.abs(actuals - preds))
-    
+    mae  = np.mean(np.abs(actuals - preds))
+
     return {"RMSE": round(rmse, 4), "MAE": round(mae, 4)}
 
 
-def calculate_ranking_metrics(recommendations_dict, test_set_df, k=10, relevance_threshold=4):
+def calculate_ranking_metrics(recommendations_dict, test_set_df,
+                               k=10, relevance_threshold=4):
     """
-    Calcola Precision@K, Recall@K e NDCG@K per l'intero sistema.
-    
-    recommendations_dict: dizionario {user_id: [list_of_recommended_recipe_ids]}
-    test_set_df: DataFrame con le interazioni di test reali, deve contenere ['user_id', 'recipe_id', 'rating']
-    k: top-K elementi da valutare
-    rerelevance_threshold: voto minimo per considerare una ricetta "rilevante" (es. 4 o 5)
+    Calcola Precision@K, Recall@K e NDCG@K (graded) per l'intero sistema.
+
+    recommendations_dict: {user_id: [lista_id_ricette_raccomandate]}
+    test_set_df: DataFrame con ['user_id', 'recipe_id', 'rating']
+    k: top-K da valutare
+    relevance_threshold: voto minimo per considerare una ricetta rilevante
     """
-    precisions = []
-    recalls = []
-    ndcgs = []
-    
-    # Raggruppiamo gli elementi rilevanti del test set per utente per velocizzare i controlli
+    precisions, recalls, ndcgs = [], [], []
+
+    # Costruisce dizionario {user_id: {recipe_id: gain}} con rilevanza graduale
     user_relevant_items = {}
     for user_id, group in test_set_df.groupby('user_id'):
-        # Isoliamo solo i piatti votati >= soglia
-        rel_items = group[group['rating'] >= relevance_threshold]['recipe_id'].tolist()
-        if rel_items:
-            user_relevant_items[user_id] = set(rel_items)
+        relevant = group[group['rating'] >= relevance_threshold]
+        if not relevant.empty:
+            user_relevant_items[user_id] = {
+                row['recipe_id']: row['rating'] - relevance_threshold + 1
+                for _, row in relevant.iterrows()
+            }
 
-    # Cicliamo su tutti gli utenti per cui abbiamo generato raccomandazioni
     for user_id, reco_items in recommendations_dict.items():
-        # Se l'utente non ha elementi rilevanti nel test set, non possiamo valutarlo
-        if user_id not in user_relevant_items or not user_relevant_items[user_id]:
+        if user_id not in user_relevant_items:
             continue
-            
-        rel_set = user_relevant_items[user_id]
-        # Prendiamo solo i primi K consigliati
+
+        rel_dict   = user_relevant_items[user_id]
         top_k_reco = reco_items[:k]
-        
-        # 1. CALCOLO PRECISION@K
-        # Quanti dei primi K raccomandati sono effettivamente nel set rilevante?
-        n_rel_and_rec = sum(1 for item in top_k_reco if item in rel_set)
-        precision = n_rel_and_rec / k
-        precisions.append(precision)
-        
-        # 2. CALCOLO RECALL@K
-        # Quanti degli elementi rilevanti totali dell'utente sono stati intercettati nei primi K?
-        recall = n_rel_and_rec / len(rel_set)
-        recalls.append(recall)
-        
-        # 3. CALCOLO NDCG@K (Normalized Discounted Cumulative Gain)
+
+        # Precision@K
+        n_rel_and_rec = sum(1 for item in top_k_reco if item in rel_dict)
+        precisions.append(n_rel_and_rec / k)
+
+        # Recall@K
+        recalls.append(n_rel_and_rec / len(rel_dict))
+
+        # NDCG@K graded
         dcg = 0.0
         for i, item in enumerate(top_k_reco):
-            if item in rel_set:
-                # Formula dello sconto logaritmico basato sulla posizione (i+1)
-                dcg += 1.0 / np.log2((i + 1) + 1)
-                
-        # Calcoliamo l'IDCG (Ideal DCG ovvero il ranking perfetto dove i rilevanti sono tutti all'inizio)
-        idcg = 0.0
-        ideal_hits = min(len(rel_set), k)
-        for i in range(ideal_hits):
-            idcg += 1.0 / np.log2((i + 1) + 1)
-            
-        ndcg = (dcg / idcg) if idcg > 0 else 0.0
-        ndcgs.append(ndcg)
-        
-    # Calcoliamo la media su tutta la popolazione di utenti valutati
+            if item in rel_dict:
+                dcg += rel_dict[item] / np.log2(i + 2)
+
+        # IDCG: ranking ideale con i rilevanti in cima
+        ideal_gains = sorted(rel_dict.values(), reverse=True)[:k]
+        idcg = sum(g / np.log2(i + 2) for i, g in enumerate(ideal_gains))
+
+        ndcgs.append(dcg / idcg if idcg > 0 else 0.0)
+
     return {
         f"Precision@{k}": round(np.mean(precisions), 4) if precisions else 0.0,
-        f"Recall@{k}": round(np.mean(recalls), 4) if recalls else 0.0,
-        f"NDCG@{k}": round(np.mean(ndcgs), 4) if ndcgs else 0.0
+        f"Recall@{k}":    round(np.mean(recalls), 4)    if recalls    else 0.0,
+        f"NDCG@{k}":      round(np.mean(ndcgs), 4)      if ndcgs      else 0.0
     }
+
+
+def calculate_coverage(recommendations_dict, total_items):
+    """
+    Percentuale del catalogo raccomandata almeno una volta.
+    Un valore basso indica che il modello tende sempre alle stesse ricette popolari.
+    """
+    recommended_items = set()
+    for recs in recommendations_dict.values():
+        recommended_items.update(recs)
+    return round(len(recommended_items) / total_items, 4)
+
+
+def calculate_intra_list_diversity(recommendations_dict, tfidf_matrix, recipe_id_to_idx):
+    """
+    Diversita media intra-lista: quanto sono diverse tra loro le ricette
+    raccomandate allo stesso utente (basato su distanza coseno sui vettori TF-IDF).
+    Un valore vicino a 1 indica alta diversita, vicino a 0 indica ricette molto simili.
+    """
+    from sklearn.metrics.pairwise import cosine_similarity
+
+    diversities = []
+    for recs in recommendations_dict.values():
+        indices = [recipe_id_to_idx[r] for r in recs if r in recipe_id_to_idx]
+        if len(indices) < 2:
+            continue
+        sub_matrix = tfidf_matrix[indices]
+        sim_matrix = cosine_similarity(sub_matrix)
+        # Prende solo il triangolo superiore (esclude la diagonale)
+        n = sim_matrix.shape[0]
+        upper = [sim_matrix[i][j] for i in range(n) for j in range(i + 1, n)]
+        avg_sim = np.mean(upper)
+        diversities.append(1.0 - avg_sim)
+
+    return round(np.mean(diversities), 4) if diversities else 0.0

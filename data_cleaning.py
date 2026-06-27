@@ -54,20 +54,23 @@ def clean_interactions(df):
     # 3. Rimozione di sicurezza delle righe senza ID (prima di qualsiasi filtro)
     df = df.dropna(subset=['user_id', 'recipe_id'])
 
-    # 4. Gestione dei duplicati: mantiene solo l'interazione più recente
+    # 4. Ordinamento per data (garantisce che keep='last' = interazione più recente)
+    df = df.sort_values(by='date')
+
+    # 5. Gestione dei duplicati: mantiene solo l'interazione più recente
     df = df.drop_duplicates(subset=['user_id', 'recipe_id'], keep='last')
 
-    # 5. Rimozione dei voti non validi (0 = commento puro; > 5 = corrotto)
+    # 6. Rimozione dei voti non validi (0 = commento puro; > 5 = corrotto)
     df = df[df['rating'].between(1, 5)]
 
-    # 6. Rimozione recensioni troppo corte dopo la pulizia (rumore per NLP)
+    # 7. Rimozione recensioni troppo corte dopo la pulizia (rumore per NLP)
     df = df[df['review'].str.len() >= 10]
 
-    # 7. Filtra utenti cold-start (basato su soglia in config.py)
+    # 8. Filtra utenti cold-start (basato su soglia in config.py)
     user_counts = df['user_id'].value_counts()
     df = df[df['user_id'].isin(user_counts[user_counts >= MIN_USER_INTERACTIONS].index)]
 
-    # 8. Filtra ricette con pochi voti (basato su soglia in config.py)
+    # 9. Filtra ricette con pochi voti (basato su soglia in config.py)
     recipe_counts = df['recipe_id'].value_counts()
     df = df[df['recipe_id'].isin(recipe_counts[recipe_counts >= MIN_RECIPE_RATINGS].index)]
 
@@ -114,6 +117,7 @@ def clean_recipes(df):
     
    
     print(f"   -> Rimozione ricette sopra le {MAX_CALORIES} kcal...")
+    df = df.dropna(subset=['calories'])
     df = df[df['calories'] <= MAX_CALORIES]
 
     return df
@@ -145,6 +149,8 @@ def main():
     df_recipes_clean.to_csv(PATH_CLEAN_RECIPES, index=False)
     
     print("Processo di pulizia completato con successo!")
+    
+    
 
 
 if __name__ == "__main__":
