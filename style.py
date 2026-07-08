@@ -19,6 +19,76 @@ PALETTE = {
 }
 
 
+TABLER_ICON_PATHS = {
+    "home": (
+        '<path d="M5 12l-2 0l9 -9l9 9l-2 0" />'
+        '<path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-7" />'
+        '<path d="M9 21v-6a2 2 0 0 1 2 -2h2a2 2 0 0 1 2 2v6" />'
+    ),
+    "trophy": (
+        '<path d="M8 21l8 0" />'
+        '<path d="M12 17l0 4" />'
+        '<path d="M7 4l10 0" />'
+        '<path d="M17 4v8a5 5 0 0 1 -10 0v-8" />'
+        '<path d="M5 9a2 2 0 0 1 -2 -2v-1a2 2 0 0 1 2 -2h2" />'
+        '<path d="M19 9a2 2 0 0 0 2 -2v-1a2 2 0 0 0 -2 -2h-2" />'
+    ),
+    "salad": (
+        '<path d="M7 21h10" />'
+        '<path d="M12 21a9 9 0 0 0 9 -9h-18a9 9 0 0 0 9 9z" />'
+        '<path d="M11.38 12a2.4 2.4 0 0 1 -.38 -1.31a2.4 2.4 0 0 1 4.8 0a2.4 2.4 0 0 1 -.38 1.31" />'
+        '<path d="M13 8l3 -5" />'
+        '<path d="M10.9 7.25l-2.9 -4.25" />'
+        '<path d="M7 12a2 2 0 1 1 4 0" />'
+    ),
+    "apple": (
+        '<path d="M12 14.528c-3.879 -4.512 -8 -1.8 -8 2.472c0 3 2 5 4 5c1.5 0 2.5 -1 4 -1s2.5 1 4 1c2 0 4 -2 4 -5c0 -4.272 -4.121 -6.984 -8 -2.472z" />'
+        '<path d="M12 14.528v-6.528" />'
+        '<path d="M12 8c0 -2.21 1.79 -4 4 -4" />'
+    ),
+    "mood-smile": (
+        '<path d="M12 12m-9 0a9 9 0 1 0 18 0a9 9 0 1 0 -18 0" />'
+        '<path d="M9 10l.01 0" />'
+        '<path d="M15 10l.01 0" />'
+        '<path d="M9.5 15a3.5 3.5 0 0 0 5 0" />'
+    ),
+    "users": (
+        '<path d="M9 7m-4 0a4 4 0 1 0 8 0a4 4 0 1 0 -8 0" />'
+        '<path d="M3 21v-2a4 4 0 0 1 4 -4h4a4 4 0 0 1 4 4v2" />'
+        '<path d="M16 3.13a4 4 0 0 1 0 7.75" />'
+        '<path d="M21 21v-2a4 4 0 0 0 -3 -3.85" />'
+    ),
+    "puzzle": (
+        '<path d="M4 7h3a1 1 0 0 0 1 -1a2 2 0 0 1 4 0a1 1 0 0 0 1 1h3a1 1 0 0 1 1 1v3a1 1 0 0 0 1 1a2 2 0 0 1 0 4a1 1 0 0 0 -1 1v3a1 1 0 0 1 -1 1h-3a1 1 0 0 1 -1 -1a2 2 0 0 0 -4 0a1 1 0 0 1 -1 1h-3a1 1 0 0 1 -1 -1v-3a1 1 0 0 1 1 -1a2 2 0 0 0 0 -4a1 1 0 0 1 -1 -1v-3a1 1 0 0 1 1 -1" />'
+    ),
+    "soup": (
+        '<path d="M5 11h14" />'
+        '<path d="M6 11a6 6 0 0 0 12 0" />'
+        '<path d="M8 18h8" />'
+        '<path d="M9 7c-.5 -.6 -.5 -1.4 0 -2" />'
+        '<path d="M12 7c-.5 -.6 -.5 -1.4 0 -2" />'
+        '<path d="M15 7c-.5 -.6 -.5 -1.4 0 -2" />'
+    ),
+}
+
+
+def tabler_icon(name: str, size: int = 18, color: str = None) -> str:
+    icon_name = name.removeprefix("ti-")
+    paths = TABLER_ICON_PATHS.get(icon_name)
+    if not paths:
+        return ""
+
+    color_style = f" color: {escape(color)};" if color else ""
+    return (
+        f'<span class="tabler-icon tabler-icon-{escape(icon_name)}" '
+        f'aria-hidden="true" style="width:{size}px;height:{size}px;{color_style}">'
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" '
+        'viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+        'stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+        f"{paths}</svg></span>"
+    )
+
+
 def get_css() -> str:
     return f"""
 <style>
@@ -58,6 +128,14 @@ def get_css() -> str:
         display: none;
     }}
 
+    [data-testid="stStatusWidget"],
+    [data-testid="stSpinner"],
+    [data-testid="stToast"],
+    div[data-testid="stDecoration"],
+    div[data-testid="stToolbar"] {{
+        display: none !important;
+    }}
+
     .block-container {{
         width: 100%;
         max-width: none;
@@ -69,62 +147,164 @@ def get_css() -> str:
         margin: 0;
     }}
 
-    /* Sidebar */
+    /* ============================================================
+       SIDEBAR STATICA — sempre visibile, non collassabile
+       ============================================================ */
+
+    /* Forza la sidebar ad essere sempre espansa e di larghezza fissa,
+       indipendentemente dall'attributo aria-expanded che Streamlit
+       potrebbe impostare a "false" */
     section[data-testid="stSidebar"] {{
+        background: var(--sidebar) !important;
+        border-right: 1px solid var(--border);
         width: 462px !important;
         min-width: 462px !important;
-        background: var(--sidebar);
-        border-right: 1px solid var(--border);
+        max-width: 462px !important;
+        transform: none !important;
+        visibility: visible !important;
+        position: relative !important;
+        z-index: 10 !important;
+        pointer-events: auto !important;
+        transition: none !important;
     }}
 
     section[data-testid="stSidebar"] > div:first-child {{
         width: 462px !important;
         box-sizing: border-box;
         padding: 40px 30px 28px !important;
+        position: relative !important;
+        z-index: 11 !important;
+        transition: none !important;
     }}
 
-    section[data-testid="stSidebar"] [data-testid="stSidebarNav"] {{
-        display: none;
+    /* Nasconde completamente il pulsante toggle/freccia di apertura-chiusura,
+       in tutte le varianti di data-testid usate dalle diverse versioni di Streamlit */
+    button[data-testid="stSidebarCollapseButton"],
+    button[data-testid="stExpandSidebarButton"],
+    button[data-testid="baseButton-headerNoPadding"],
+    button[aria-label*="sidebar" i],
+    button[title*="sidebar" i],
+    button[aria-label*="Hide" i],
+    button[title*="Hide" i],
+    button[aria-label*="Collapse" i],
+    button[title*="Collapse" i],
+    [data-testid="collapsedControl"],
+    [data-testid="stSidebarCollapsedControl"],
+    [data-testid="stSidebarHeader"] {{
+        display: none !important;
+        visibility: hidden !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
+        width: 0 !important;
+        height: 0 !important;
+        overflow: hidden !important;
+    }}
+
+    /* Nasconde completamente la navigazione automatica multipagina di Streamlit */
+    [data-testid="stSidebarNav"],
+    [data-testid="stSidebarNav"] *,
+    nav[aria-label="Main navigation"],
+    nav[aria-label="Main navigation"] * {{
+        display: none !important;
+        visibility: hidden !important;
+        height: 0 !important;
+        min-height: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        overflow: hidden !important;
     }}
 
     .sidebar-brand {{
-        text-align: center;
-        margin: -100px 0 66px;
+        display: flex;
+        align-items: center;
+        justify-content: flex-start;
+        gap: 10px;
+        margin: 0 0 34px;
+        padding-left: 8px;
     }}
 
     section[data-testid="stSidebar"] p.sidebar-title {{
         margin: 0 !important;
         font-family: "Libre Caslon Display", Georgia, serif !important;
-        font-size: 30px !important;
+        font-size: 25px !important;
         line-height: 1.2 !important;
         color: var(--ink) !important;
     }}
 
-    section[data-testid="stSidebar"] p.sidebar-subtitle {{
-        margin: 16px 0 0 !important;
-        color: var(--soft) !important;
-        font-size: 24px !important;
-        line-height: 1.35 !important;
+    .sidebar-brand-icon {{
+        color: var(--terra);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
     }}
 
-    section[data-testid="stSidebar"] [data-testid="stPageLink"] {{
+    section[data-testid="stSidebar"] [data-testid="stPageLink"],
+    section[data-testid="stSidebar"] .stButton {{
         margin-bottom: 17px;
     }}
 
-    section[data-testid="stSidebar"] [data-testid="stPageLink"] a {{
+    section[data-testid="stSidebar"] [data-testid="stPageLink"],
+    section[data-testid="stSidebar"] [data-testid="stPageLink"] *,
+    section[data-testid="stSidebar"] .stButton,
+    section[data-testid="stSidebar"] .stButton * {{
+        pointer-events: auto !important;
+    }}
+
+    section[data-testid="stSidebar"] [data-testid="stPageLink"] a,
+    section[data-testid="stSidebar"] .stButton > button {{
         min-height: 55px;
-        padding: 0 20px 0 74px;
+        padding: 0 20px 0 54px;
         border-radius: 15px;
+        border: 0;
+        background: transparent;
         color: var(--ink);
         font-size: 27px !important;
         font-weight: 400;
         text-decoration: none;
+        width: 100%;
+        justify-content: flex-start;
+        box-shadow: none;
+        cursor: pointer;
     }}
 
-    section[data-testid="stSidebar"] [data-testid="stPageLink"] a p {{
+    section[data-testid="stSidebar"] [data-testid="stPageLink"] a p,
+    section[data-testid="stSidebar"] .stButton > button p {{
         margin: 0 !important;
         font-size: 27px !important;
         line-height: 1.25 !important;
+    }}
+
+    .tabler-icon {{
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex: 0 0 auto;
+        color: currentColor;
+        line-height: 1;
+        vertical-align: -0.15em;
+    }}
+
+    .tabler-icon svg {{
+        display: block;
+    }}
+
+    .sidebar-nav-icon {{
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+        top: 39px;
+        left: 20px;
+        z-index: 2;
+        width: 23px;
+        height: 0;
+        min-height: 0;
+        color: var(--soft);
+        pointer-events: none;
+    }}
+
+    .sidebar-nav-icon.active {{
+        color: var(--terra-dark);
     }}
 
     section[data-testid="stSidebar"] [data-testid="stPageLink"] a[aria-current="page"] {{
@@ -132,8 +312,16 @@ def get_css() -> str:
         color: var(--terra-dark);
     }}
 
-    section[data-testid="stSidebar"] [data-testid="stPageLink"] a:hover {{
+    section[data-testid="stSidebar"] .stButton > button[kind="primary"] {{
+        background: var(--terra-soft);
+        color: var(--terra-dark);
+        font-weight: 600;
+    }}
+
+    section[data-testid="stSidebar"] [data-testid="stPageLink"] a:hover,
+    section[data-testid="stSidebar"] .stButton > button:hover {{
         background: rgba(243, 217, 196, .55);
+        color: var(--ink);
     }}
 
     section[data-testid="stSidebar"] p.nav-group {{
@@ -148,10 +336,23 @@ def get_css() -> str:
     section[data-testid="stSidebar"] p.nav-placeholder {{
         min-height: 55px;
         margin: 0 !important;
-        padding: 9px 20px 9px 74px;
+        padding: 9px 20px;
         color: var(--ink) !important;
         font-size: 27px !important;
         line-height: 37px !important;
+    }}
+
+    section[data-testid="stSidebar"] p.nav-placeholder-home {{
+        min-height: 55px;
+        margin: 0 0 17px !important;
+        padding: 9px 20px !important;
+        border-radius: 15px;
+        background: var(--terra-soft);
+        color: var(--terra-dark) !important;
+        font-size: 27px !important;
+        font-weight: 600 !important;
+        line-height: 37px !important;
+        text-align: center;
     }}
 
     .sidebar-spacer {{
@@ -182,6 +383,15 @@ def get_css() -> str:
     section[data-testid="stSidebar"] .stTextInput input::placeholder {{
         color: var(--muted);
         opacity: 1;
+    }}
+
+    /* Sposta il contenuto principale in modo che non venga mai
+       sovrapposto dalla sidebar fissa, anche se Streamlit tenta
+       di "collassarla" internamente */
+    div[data-testid="stAppViewContainer"] > section.main {{
+        margin-left: 0 !important;
+        position: relative !important;
+        z-index: 0 !important;
     }}
 
     /* Home */
@@ -225,6 +435,9 @@ def get_css() -> str:
     }}
 
     p.model-card-title {{
+        display: flex;
+        align-items: center;
+        gap: 10px;
         margin: 0 0 8px !important;
         color: var(--ink) !important;
         font-size: 26px !important;
@@ -260,6 +473,20 @@ def get_css() -> str:
         border-radius: 50%;
         background: var(--terra-soft);
         transform: translateY(-50%);
+    }}
+
+    .model-card-featured-icon {{
+        position: absolute;
+        left: 36px;
+        top: 50%;
+        width: 80px;
+        height: 80px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--terra-dark);
+        transform: translateY(-50%);
+        z-index: 1;
     }}
 
     p.featured-badge {{
@@ -369,11 +596,27 @@ def get_css() -> str:
         font-weight: 500;
     }}
 
+    .stButton > button:disabled,
+    .stButton > button[disabled] {{
+        opacity: 1 !important;
+        cursor: pointer !important;
+        filter: none !important;
+    }}
+
+    .stButton > button:disabled *,
+    .stButton > button[disabled] * {{
+        opacity: 1 !important;
+    }}
+
     @media (max-width: 1100px) {{
-        section[data-testid="stSidebar"],
-        section[data-testid="stSidebar"] > div {{
+        section[data-testid="stSidebar"] {{
             width: 360px !important;
             min-width: 360px !important;
+            max-width: 360px !important;
+        }}
+
+        section[data-testid="stSidebar"] > div:first-child {{
+            width: 360px !important;
         }}
 
         .block-container {{
@@ -409,6 +652,84 @@ def get_css() -> str:
     }}
 </style>
 """
+
+
+def render_sidebar(mode: str = "internal") -> None:
+    import streamlit as st
+
+    page_links = [
+        ("home", "app.py", "Home", "home"),
+        ("popularity", "pages/popularity.py", "1 · Popolari", "trophy"),
+        ("svuota_frigo", "pages/svuota_frigo.py", "2 · Svuota-frigo", "salad"),
+        ("salutistico", "pages/salutistico.py", "3 · Salutistico", "apple"),
+        ("mood", "pages/mood.py", "4 · Mood", "mood-smile"),
+        ("collaborative", "pages/collaborative.py", "5 · Collaborative", "users"),
+        ("hybrid", "pages/hybrid.py", "6 · Ibrido", "puzzle"),
+    ]
+
+    def set_current_page(page_key: str) -> None:
+        st.session_state["current_page"] = page_key
+
+    def nav_item(page_key: str, target: str, label: str, icon_name: str) -> None:
+        current_page = st.session_state.get("current_page", "home")
+        is_active = mode == "internal" and current_page == page_key
+        icon_class = "sidebar-nav-icon active" if is_active else "sidebar-nav-icon"
+
+        st.markdown(
+            f'<div class="{icon_class}">{tabler_icon(icon_name, size=23)}</div>',
+            unsafe_allow_html=True,
+        )
+        if mode == "pages":
+            st.page_link(target, label=label, use_container_width=True)
+            return
+
+        st.button(
+            label,
+            key=f"nav_{page_key}",
+            type="primary" if is_active else "secondary",
+            use_container_width=True,
+            on_click=set_current_page,
+            args=(page_key,),
+        )
+
+    with st.sidebar:
+        st.markdown(
+            '<div class="sidebar-brand">'
+            f'<span class="sidebar-brand-icon">{tabler_icon("soup", size=26)}</span>'
+            '<p class="sidebar-title">Food Recommender</p>'
+            "</div>",
+            unsafe_allow_html=True,
+        )
+
+        nav_item(*page_links[0])
+
+        st.markdown('<p class="nav-group">Senza profilo</p>', unsafe_allow_html=True)
+        nav_item(*page_links[1])
+        nav_item(*page_links[2])
+
+        st.markdown('<p class="nav-group">Con vincoli</p>', unsafe_allow_html=True)
+        nav_item(*page_links[3])
+        nav_item(*page_links[4])
+
+        st.markdown('<p class="nav-group">Personalizzato</p>', unsafe_allow_html=True)
+        nav_item(*page_links[5])
+        nav_item(*page_links[6])
+
+        st.markdown('<div class="sidebar-spacer"></div>', unsafe_allow_html=True)
+        st.markdown('<div class="sidebar-user-divider"></div>', unsafe_allow_html=True)
+
+        if "user_id" not in st.session_state:
+            st.session_state.user_id = ""
+
+        st.text_input(
+            "User ID (opzionale)",
+            key="user_id",
+            help=(
+                "Se inserisci un ID utente presente nel dataset, i modelli "
+                "personalizzati useranno la sua cronologia."
+            ),
+            placeholder="es. 8937",
+        )
 
 
 def recipe_card_html(
@@ -452,6 +773,7 @@ def model_card_html(
     icon: str,
     title: str,
     description: str,
+    icon_name: str = None,
     featured: bool = False,
 ) -> str:
     css_class = "model-card featured" if featured else "model-card"
@@ -465,10 +787,22 @@ def model_card_html(
         if description
         else ""
     )
+    selected_icon = icon_name or icon or ""
+    featured_icon_html = (
+        f'<span class="model-card-featured-icon">'
+        f'{tabler_icon(selected_icon, size=38, color="#8C3A1F")}</span>'
+        if featured and selected_icon
+        else ""
+    )
+    title_icon_html = (
+        tabler_icon(selected_icon, size=20, color="#7A6A57")
+        if selected_icon and not featured
+        else ""
+    )
 
     return (
-        f'<div class="{css_class}"><div>{badge}'
-        f'<p class="model-card-title">{escape(title)}</p>'
+        f'<div class="{css_class}">{featured_icon_html}<div>{badge}'
+        f'<p class="model-card-title">{title_icon_html}<span>{escape(title)}</span></p>'
         f"{description_html}</div></div>"
     )
 

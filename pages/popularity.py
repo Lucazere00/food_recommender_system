@@ -12,11 +12,17 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import streamlit as st
-from style import get_css, recipe_card_html, empty_state_html
+from style import get_css, recipe_card_html, empty_state_html, render_sidebar
 from data_loader import get_popularity_model
 
-st.set_page_config(page_title="Popularity — Food Recommender", page_icon="🏆", layout="wide")
+st.set_page_config(
+    page_title="Popularity — Food Recommender",
+    page_icon="🏆",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 st.markdown(get_css(), unsafe_allow_html=True)
+render_sidebar(mode="pages")
 
 st.markdown('<p class="eyebrow">Modello 1 — Nessun login richiesto</p>', unsafe_allow_html=True)
 st.title("Le ricette più apprezzate")

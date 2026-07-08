@@ -26,17 +26,17 @@ from models.collaborative_filtering import CollaborativeFilteringRecommender
 from models.hybrid_based import HybridRecommender
 
 
-@st.cache_data
+@st.cache_data(show_spinner=False)
 def load_recipes() -> pd.DataFrame:
     return pd.read_csv(PATH_CLEAN_RECIPES)
 
 
-@st.cache_data
+@st.cache_data(show_spinner=False)
 def load_interactions() -> pd.DataFrame:
     return pd.read_csv(PATH_CLEAN_INTERACTIONS)
 
 
-@st.cache_resource
+@st.cache_resource(show_spinner=False)
 def get_popularity_model() -> PopularityRecommender:
     df_recipes = load_recipes()
     df_interactions = load_interactions()
@@ -45,7 +45,7 @@ def get_popularity_model() -> PopularityRecommender:
     return model
 
 
-@st.cache_resource
+@st.cache_resource(show_spinner=False)
 def get_content_based_model() -> ContentBasedRecommender:
     df_recipes = load_recipes()
     model = ContentBasedRecommender()
@@ -53,7 +53,7 @@ def get_content_based_model() -> ContentBasedRecommender:
     return model
 
 
-@st.cache_resource
+@st.cache_resource(show_spinner=False)
 def get_health_based_model() -> HealthBasedRecommender:
     df_recipes = load_recipes()
     model = HealthBasedRecommender()
@@ -61,7 +61,7 @@ def get_health_based_model() -> HealthBasedRecommender:
     return model
 
 
-@st.cache_resource
+@st.cache_resource(show_spinner=False)
 def get_mood_based_model() -> MoodBasedRecommender:
     df_recipes = load_recipes()
     model = MoodBasedRecommender()
@@ -69,7 +69,7 @@ def get_mood_based_model() -> MoodBasedRecommender:
     return model
 
 
-@st.cache_resource
+@st.cache_resource(show_spinner=False)
 def get_collaborative_filtering_model() -> CollaborativeFilteringRecommender:
     df_recipes = load_recipes()
     df_interactions = load_interactions()
@@ -78,7 +78,7 @@ def get_collaborative_filtering_model() -> CollaborativeFilteringRecommender:
     return model
 
 
-@st.cache_resource
+@st.cache_resource(show_spinner=False)
 def get_hybrid_model() -> HybridRecommender:
     pop = get_popularity_model()
     content = get_content_based_model()
