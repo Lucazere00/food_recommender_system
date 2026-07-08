@@ -18,7 +18,7 @@ import streamlit as st
 import pandas as pd
 
 from config import PATH_CLEAN_RECIPES, PATH_CLEAN_INTERACTIONS
-from models.popularity import PopularityRecommender
+from models.popularity import PopularityRecommender, ensure_list_column
 from models.content_based import ContentBasedRecommender
 from models.health_based import HealthBasedRecommender
 from models.mood_based import MoodBasedRecommender
@@ -34,6 +34,18 @@ def load_recipes() -> pd.DataFrame:
 @st.cache_data(show_spinner=False)
 def load_interactions() -> pd.DataFrame:
     return pd.read_csv(PATH_CLEAN_INTERACTIONS)
+
+
+@st.cache_data(show_spinner=False)
+def get_top_tags(n=150) -> list[str]:
+    """
+    Restituisce i tag più frequenti nelle ricette, già pronti per l'autocomplete.
+    """
+    df_recipes = load_recipes()
+    tags = ensure_list_column(df_recipes["tags"]).explode().dropna()
+    tags = tags.astype(str).str.strip()
+    tags = tags[tags != ""]
+    return tags.value_counts().head(n).index.tolist()
 
 
 @st.cache_resource(show_spinner=False)

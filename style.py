@@ -69,6 +69,9 @@ TABLER_ICON_PATHS = {
         '<path d="M12 7c-.5 -.6 -.5 -1.4 0 -2" />'
         '<path d="M15 7c-.5 -.6 -.5 -1.4 0 -2" />'
     ),
+    "chevron-down": (
+        '<path d="M6 9l6 6l6 -6" />'
+    ),
 }
 
 
@@ -548,6 +551,26 @@ def get_css() -> str:
         font-weight: 500;
     }}
 
+    .recipe-card-header {{
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+    }}
+
+    .recipe-card-header .recipe-title {{
+        flex: 1;
+    }}
+
+    .votes-badge {{
+        flex: 0 0 auto;
+        padding: 3px 10px;
+        border-radius: 20px;
+        font-size: 11px;
+        font-weight: 500;
+        white-space: nowrap;
+    }}
+
     .recipe-meta {{
         margin: 0 0 8px;
         color: var(--soft);
@@ -558,6 +581,35 @@ def get_css() -> str:
         color: var(--terra);
         font-weight: 500;
         text-align: right;
+    }}
+
+    .recipe-score-row {{
+        display: flex;
+        justify-content: flex-end;
+        align-items: center;
+        gap: 8px;
+    }}
+
+    .recipe-score-row .recipe-score {{
+        margin: 0;
+    }}
+
+    .vs-average-badge {{
+        padding: 2px 8px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 500;
+        white-space: nowrap;
+    }}
+
+    .load-more-icon-label {{
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        margin-top: 14px;
+        color: var(--ink);
+        font-weight: 500;
     }}
 
     .pill {{
@@ -572,6 +624,11 @@ def get_css() -> str:
     .pill-have {{
         background: {PALETTE["sage_soft"]};
         color: {PALETTE["sage"]};
+    }}
+
+    .pill-ingredient {{
+        background: #E3EBE2;
+        color: #3B6D11;
     }}
 
     .pill-missing {{
@@ -652,6 +709,10 @@ def get_css() -> str:
     }}
 </style>
 """
+
+
+def popularity_page_css() -> str:
+    return ""
 
 
 def render_sidebar(mode: str = "internal") -> None:
@@ -740,6 +801,11 @@ def recipe_card_html(
     pills_have=None,
     pills_missing=None,
     highlighted=False,
+    votes_badge: dict | None = None,
+    score_separator: str = ": ",
+    ingredients=None,
+    steps=None,
+    vs_average: float | None = None,
 ) -> str:
     pills_html = ""
     if pills_have:
@@ -754,18 +820,75 @@ def recipe_card_html(
         )
 
     css_class = "recipe-card highlighted" if highlighted else "recipe-card"
+    if votes_badge:
+        css_class += " with-votes"
     pills_block = (
         f'<div style="margin-bottom:8px">{pills_html}</div>' if pills_html else ""
     )
+    badge_html = ""
+    if votes_badge:
+        numero_voti = int(votes_badge.get("numero_voti", 0))
+        if numero_voti >= 200:
+            badge_bg = "#EAF3DE"
+            badge_color = "#27500A"
+            badge_label = "alta fiducia"
+        elif numero_voti >= 50:
+            badge_bg = "#FAEEDA"
+            badge_color = "#633806"
+            badge_label = "media fiducia"
+        else:
+            badge_bg = "#FCEBEB"
+            badge_color = "#791F1F"
+            badge_label = "fiducia bassa"
+        badge_html = (
+            f'<span class="votes-badge" style="background:{badge_bg}; color:{badge_color};">'
+            f"{numero_voti} voti · {badge_label}</span>"
+        )
+
+    title_html = (
+        '<div class="recipe-card-header">'
+        f'<p class="recipe-title">{escape(str(name))}</p>'
+        f"{badge_html}"
+        "</div>"
+    )
+    score_html = (
+        f'<p class="recipe-score">{escape(str(score_label))}{escape(str(score_separator))}'
+        f"{escape(str(score_value))}</p>"
+    )
+    if vs_average is not None:
+        if vs_average >= 0:
+            average_bg = "#EAF3DE"
+            average_color = "#27500A"
+            average_text = f"+{vs_average:.2f} sopra la media"
+        else:
+            average_bg = "#FCEBEB"
+            average_color = "#791F1F"
+            average_text = f"{abs(vs_average):.2f} sotto la media"
+        score_html = (
+            '<div class="recipe-score-row">'
+            f"{score_html}"
+            f'<span class="vs-average-badge" style="background:{average_bg}; color:{average_color};">'
+            f"{escape(average_text)}</span>"
+            "</div>"
+        )
 
     return (
         f'<div class="{css_class}">'
-        f'<p class="recipe-title">{escape(str(name))}</p>'
+        f"{title_html}"
         f'<p class="recipe-meta">{escape(str(meta))}</p>'
         f"{pills_block}"
-        f'<p class="recipe-score">{escape(str(score_label))}: '
-        f"{escape(str(score_value))}</p>"
+        f"{score_html}"
         "</div>"
+    )
+
+
+def ingredient_pills_html(ingredients: list[str]) -> str:
+    """Genera le pillole degli ingredienti per i dettagli ricetta."""
+    if not ingredients:
+        return ""
+    return "".join(
+        f'<span class="pill pill-ingredient">{escape(str(ingredient))}</span>'
+        for ingredient in ingredients
     )
 
 
