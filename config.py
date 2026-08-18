@@ -16,5 +16,5 @@ SVD_N_FACTORS   = 50
 SVD_N_EPOCHS    = 20
 SVD_LR_ALL      = 0.005
 
-OPENAI_API_KEY  = "sk-..."
+OPENAI_API_KEY  = ""
 GROQ_API_KEY    = "tuo_api_key_qui"

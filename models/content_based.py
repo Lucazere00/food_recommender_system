@@ -78,14 +78,17 @@ class ContentBasedRecommender:
             sparse.save_npz(self.matrix_path, self.tfidf_matrix)
             print(f"-> Matrice TF-IDF salvata in: {self.matrix_path}")
 
-    def _count_missing(self, row, user_stems):
+    def _count_missing(self, row, user_ingredient_stems):
         """Calcola ingredienti trovati e mancanti per una ricetta."""
         found = []
         missing = []
         for ing in row['ingredients']:
             ing_stemmed = self._clean_and_stem_ingredients([ing])
             ing_words = set(ing_stemmed.split())
-            if ing_words and ing_words.issubset(user_stems):
+            if ing_words and any(
+                ing_words.issubset(user_stems)
+                for user_stems in user_ingredient_stems
+            ):
                 found.append(ing)
             else:
                 missing.append(ing)
@@ -106,7 +109,13 @@ class ContentBasedRecommender:
         query_vector = self.vectorizer.transform([query_string])
         similarities = cosine_similarity(query_vector, self.tfidf_matrix).flatten()
 
-        user_stems = set(query_string.split())
+        user_ingredient_stems = [
+            set(self._clean_and_stem_ingredients([ingredient]).split())
+            for ingredient in user_ingredients
+        ]
+        user_ingredient_stems = [
+            stems for stems in user_ingredient_stems if stems
+        ]
         matched_indices = np.where(similarities > 0.0)[0]
 
         # Vettorizzato: estrae il sottoinsieme di ricette con similarita > 0
@@ -116,7 +125,7 @@ class ContentBasedRecommender:
 
         results = []
         for _, row in matched_df.iterrows():
-            found, missing = self._count_missing(row, user_stems)
+            found, missing = self._count_missing(row, user_ingredient_stems)
             if len(missing) <= max_missing_ingredients:
                 results.append({
                     'id':                    int(row['id']),

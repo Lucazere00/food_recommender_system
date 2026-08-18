@@ -1,14 +1,18 @@
 """Viste riusabili per l'app Food Recommender."""
 
 import ast
+import inspect
 
 import streamlit as st
 
 from data_loader import (
     get_collaborative_filtering_model,
+    get_common_ingredients,
     get_content_based_model,
+    get_explainer,
     get_health_based_model,
     get_hybrid_model,
+    get_intent_parser,
     get_mood_based_model,
     get_popularity_model,
     get_top_tags,
@@ -16,8 +20,10 @@ from data_loader import (
 )
 from style import (
     empty_state_html,
+    explanation_quote_html,
     ingredient_pills_html,
     model_card_html,
+    param_pills_html,
     popularity_page_css,
     recipe_card_html,
 )
@@ -32,6 +38,82 @@ PAGE_LABELS = {
     "collaborative": "5 · Collaborative",
     "hybrid": "6 · Ibrido",
 }
+
+
+PANTRY_INGREDIENTS = ["salt", "olive oil", "onion", "black pepper", "butter", "garlic"]
+MOOD_AXES = ["body", "time", "taste", "price", "mental", "modification"]
+
+
+def render_mood_radar(user_vector: dict, recipe_vector: dict, key: str):
+    try:
+        import plotly.graph_objects as go
+    except ModuleNotFoundError:
+        st.caption("Radar mood non disponibile: installa Plotly nel virtualenv.")
+        return
+
+    user_values = [user_vector[axis] for axis in MOOD_AXES]
+    recipe_values = [recipe_vector[axis] for axis in MOOD_AXES]
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatterpolar(
+        r=user_values,
+        theta=MOOD_AXES,
+        fill="toself",
+        name="Il tuo mood",
+        line=dict(color="#5C7A52", width=2),
+        fillcolor="rgba(92, 122, 82, 0.15)",
+        opacity=0.85,
+    ))
+    fig.add_trace(go.Scatterpolar(
+        r=recipe_values,
+        theta=MOOD_AXES,
+        fill="toself",
+        name="Questa ricetta",
+        line=dict(color="#BF4D2D", width=2),
+        fillcolor="rgba(191, 77, 45, 0.15)",
+        opacity=0.85,
+    ))
+    fig.update_layout(
+        width=220,
+        height=220,
+        margin=dict(l=28, r=28, t=20, b=20),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        showlegend=False,
+        font=dict(size=10, color="#806F5B"),
+        polar=dict(
+            bgcolor="rgba(0,0,0,0)",
+            radialaxis=dict(
+                range=[-5, 5],
+                tickvals=[-5, 0, 5],
+                tickfont=dict(size=9),
+                gridcolor="#E2D3B8",
+                linecolor="#E2D3B8",
+            ),
+            angularaxis=dict(
+                gridcolor="#E2D3B8",
+                linecolor="#E2D3B8",
+            ),
+        ),
+    )
+    st.plotly_chart(fig, use_container_width=False, key=key)
+
+
+def add_pantry_ingredient(ingredient):
+    """Aggiunge un ingrediente comune senza duplicarlo."""
+    current_ingredients = list(st.session_state.get("fridge_ingredients", []))
+    current_normalized = {item.lower().strip() for item in current_ingredients}
+    if ingredient.lower().strip() not in current_normalized:
+        st.session_state["fridge_ingredients"] = current_ingredients + [ingredient]
+        st.rerun()
+
+
+def calculate_match_pct(found, missing):
+    """Calcola la percentuale di ingredienti coperti dalla ricetta."""
+    total = len(found) + len(missing)
+    if total == 0:
+        return 0
+    return round((len(found) / total) * 100)
 
 
 def format_popularity_rows(df):
@@ -91,24 +173,184 @@ def get_recipe_details(model, recipe_id):
     return ingredients, steps
 
 
+def set_home_query(example_text: str) -> None:
+    st.session_state["home_llm_query"] = example_text
+
+
+def build_home_health_params(intent: dict) -> dict | None:
+    health_params = {
+        "max_calories": intent.get("max_calories"),
+        "min_protein_pct": intent.get("min_protein_pct"),
+        "tags_required": intent.get("tags_required"),
+        "profile_name": intent.get("profile_name"),
+    }
+    has_health_signal = any(
+        health_params.get(key) not in (None, [], "")
+        for key in ("max_calories", "min_protein_pct", "tags_required", "profile_name")
+    )
+    if not has_health_signal:
+        return None
+    if not health_params["profile_name"]:
+        health_params["profile_name"] = "balanced"
+    return health_params
+
+
+def render_home_llm_results(payload: dict) -> None:
+    intent = payload.get("intent", {})
+    results = payload.get("results", [])
+    explanation = payload.get("explanation")
+    health_params = payload.get("health_params")
+
+    st.markdown(
+        "<p class=\"eyebrow\">Parametri interpretati</p>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        param_pills_html(
+            mood_dict=intent.get("mood"),
+            health_dict=health_params,
+            ingredients_list=intent.get("ingredients"),
+        ),
+        unsafe_allow_html=True,
+    )
+
+    if not results:
+        st.markdown(
+            empty_state_html(
+                "Nessuna ricetta trovata con questa richiesta. Prova a togliere "
+                "un vincolo o a descrivere ingredienti piu comuni."
+            ),
+            unsafe_allow_html=True,
+        )
+        return
+
+    st.caption(f"{len(results)} ricette raccomandate")
+    for index, recipe in enumerate(results):
+        meta = f"{recipe['minuti']} min · {recipe['calorie']} kcal"
+        st.markdown(
+            recipe_card_html(
+                name=recipe["name"].title(),
+                meta=meta,
+                score_label="Score ibrido",
+                score_value=recipe["score_ibrido_finale"],
+                highlighted=index == 0,
+            ),
+            unsafe_allow_html=True,
+        )
+        if index == 0 and explanation:
+            st.markdown(explanation_quote_html(explanation), unsafe_allow_html=True)
+
+
 def render_home() -> None:
+    if "home_llm_query" not in st.session_state:
+        st.session_state["home_llm_query"] = ""
+
     st.markdown(
         '<main class="home-shell">'
+        '<p class="eyebrow">Chef AI — sostituisce l\'ibrido</p>'
         '<h1 class="home-title">Cosa cuciniamo oggi?</h1>'
-        '<p class="home-intro">Sei approcci diversi alla raccomandazione di '
-        "ricette, costruiti sul dataset Food.com. Scegli da dove iniziare.</p>"
+        '<p class="home-intro">Scrivi liberamente: mood, ingredienti disponibili, '
+        "vincoli calorici. Il modello capisce e ti propone una ricetta.</p>"
         "</main>",
         unsafe_allow_html=True,
     )
 
-    st.markdown(
-        model_card_html(
-            icon="mood-smile",
-            title="Mood-based — dimmi come ti senti",
-            description="",
-            icon_name="mood-smile",
-            featured=True,
+    with st.form("home_llm_form"):
+        user_text = st.text_area(
+            "Richiesta libera",
+            key="home_llm_query",
+            label_visibility="collapsed",
+            height=154,
+            placeholder=(
+                "sono stanco dopo lo studio, voglio qualcosa di veloce e "
+                "confortante, ho pollo e aglio in frigo, sotto le 500 kcal"
+            ),
+        )
+        submitted = st.form_submit_button(
+            "Genera raccomandazione",
+            type="primary",
+            use_container_width=False,
+        )
+
+    chip_cols = st.columns(3)
+    examples = [
+        (
+            "stress da esame",
+            "sono sotto stress da esame, voglio qualcosa di veloce e confortante",
         ),
+        (
+            "detox domenicale",
+            "voglio un pranzo leggero e detox per domenica, sotto le 450 kcal",
+        ),
+        (
+            "cena tra amici",
+            "cena tra amici, qualcosa di gustoso e un po' speciale ma non troppo caro",
+        ),
+    ]
+    for col, (label, text) in zip(chip_cols, examples):
+        with col:
+            st.button(
+                label,
+                key=f"home_example_{label}",
+                on_click=set_home_query,
+                args=(text,),
+            )
+
+    if submitted:
+        cleaned_text = (user_text or "").strip()
+        if not cleaned_text:
+            st.warning("Scrivi una richiesta prima di generare la raccomandazione.")
+        else:
+            parser = get_intent_parser()
+            with st.spinner("Il cuoco AI sta pensando..."):
+                intent = parser.parse_query(cleaned_text)
+                st.session_state["debug_last_error"] = parser.last_error
+                health_params = build_home_health_params(intent)
+                user_id = parse_user_id(st.session_state.get("user_id", ""))
+                results = get_hybrid_model().recommend(
+                    user_id=user_id,
+                    user_ingredients=intent.get("ingredients"),
+                    mood_params=intent.get("mood"),
+                    health_params=health_params,
+                    top_k=5,
+                )
+                explanation = (
+                    get_explainer().generate_explanation(cleaned_text, results[0])
+                    if results
+                    else None
+                )
+            st.session_state["home_llm_result"] = {
+                "query": cleaned_text,
+                "intent": intent,
+                "health_params": health_params,
+                "results": results,
+                "explanation": explanation,
+                "llm_configured": parser.is_configured,
+                "used_llm_last_call": parser.used_llm_last_call,
+                "last_error": parser.last_error,
+            }
+
+    home_result = st.session_state.get("home_llm_result")
+    if home_result:
+        if home_result.get("llm_configured") and not home_result.get("used_llm_last_call"):
+            st.warning(
+                f"L'API OpenAI ha risposto con un errore ({home_result.get('last_error')}); "
+                "sto usando il parser locale di riserva, meno preciso sul linguaggio naturale."
+            )
+        elif not home_result.get("llm_configured"):
+            st.warning("Modalita AI non disponibile: chiave OPENAI_API_KEY non configurata.")
+        render_home_llm_results(home_result)
+    else:
+        st.markdown(
+            empty_state_html("Scrivi cosa ti va e premi «Genera raccomandazione»."),
+            unsafe_allow_html=True,
+        )
+
+    st.markdown(
+        '<div class="mode-separator">'
+        '<p class="eyebrow">Preferisci scegliere tu?</p>'
+        '<p class="home-intro">Naviga i singoli modelli qui sotto.</p>'
+        "</div>",
         unsafe_allow_html=True,
     )
 
@@ -116,6 +358,7 @@ def render_home() -> None:
         ("trophy", "Popolari", "Le ricette più votate, pesate con Bayesian Average."),
         ("salad", "Svuota-frigo", "Ricette dai tuoi ingredienti disponibili."),
         ("apple", "Salutistico", "Vincoli nutrizionali e piano settimanale."),
+        ("mood-smile", "Mood-based", "Raccomandazioni guidate dalle 6 dimensioni emotive."),
         ("users", "Collaborative", "SVD sulla cronologia degli utenti."),
         ("puzzle", "Ibrido", "Combina tutti i modelli con pesi adattivi."),
     ]
@@ -312,19 +555,50 @@ def render_svuota_frigo() -> None:
     )
     st.title("Cosa hai in frigo?")
     st.caption(
-        "Scrivi gli ingredienti che hai disponibili, separati da virgola. "
-        "Il sistema confronta il loro vettore TF-IDF con quello di ogni "
-        "ricetta per trovare le corrispondenze migliori."
+        "Scrivi o seleziona gli ingredienti disponibili. Il sistema confronta "
+        "il loro vettore TF-IDF con quello di ogni ricetta."
     )
 
     model = get_content_based_model()
+    common_ingredients = get_common_ingredients(model.df_recipes)
 
-    ingredients_raw = st.text_input(
-        "Ingredienti disponibili",
-        placeholder="es. chicken breast, lemon, rosemary, garlic",
-        help="In inglese per maggiore precisione, dato che il dataset è in inglese.",
-        key="fridge_ingredients",
+    if "fridge_ingredients" not in st.session_state:
+        st.session_state["fridge_ingredients"] = []
+
+    ingredient_options = list(
+        dict.fromkeys(
+            list(st.session_state["fridge_ingredients"])
+            + PANTRY_INGREDIENTS
+            + common_ingredients
+        )
     )
+    multiselect_kwargs = {
+        "label": "Ingredienti disponibili",
+        "options": ingredient_options,
+        "placeholder": "aggiungi un ingrediente...",
+        "help": "In inglese per maggiore precisione, dato che il dataset è in inglese.",
+        "key": "fridge_ingredients",
+    }
+    if "accept_new_options" in inspect.signature(st.multiselect).parameters:
+        multiselect_kwargs["accept_new_options"] = True
+
+    ingredients_list = st.multiselect(**multiselect_kwargs)
+
+    st.markdown(
+        '<p style="margin:10px 0 8px; color:var(--soft); font-size:0.82rem; '
+        'font-weight:600;">Ingredienti comuni — aggiungi in un click</p>',
+        unsafe_allow_html=True,
+    )
+    pantry_cols = st.columns(len(PANTRY_INGREDIENTS))
+    for pantry_col, pantry_ingredient in zip(pantry_cols, PANTRY_INGREDIENTS):
+        with pantry_col:
+            st.button(
+                f"+ {pantry_ingredient}",
+                key=f"pantry_{pantry_ingredient}",
+                on_click=add_pantry_ingredient,
+                args=(pantry_ingredient,),
+                use_container_width=True,
+            )
 
     col1, col2 = st.columns(2)
     with col1:
@@ -348,7 +622,7 @@ def render_svuota_frigo() -> None:
 
     st.markdown("---")
 
-    if not ingredients_raw.strip():
+    if not ingredients_list:
         st.markdown(
             empty_state_html(
                 "Inserisci almeno un ingrediente per vedere le ricette compatibili."
@@ -357,16 +631,30 @@ def render_svuota_frigo() -> None:
         )
         return
 
-    ingredients_list = [i.strip() for i in ingredients_raw.split(",") if i.strip()]
     st.caption("Stai cercando ricette con: " + ", ".join(f"**{i}**" for i in ingredients_list))
+
+    filter_key = (
+        tuple(sorted(ingredient.lower().strip() for ingredient in ingredients_list)),
+        int(max_missing),
+    )
+    previous_filter_key = st.session_state.get("fridge_previous_filter")
+    if previous_filter_key != filter_key:
+        st.session_state["fridge_visible_count"] = int(top_k)
+        st.session_state["fridge_previous_filter"] = filter_key
+    elif "fridge_visible_count" not in st.session_state:
+        st.session_state["fridge_visible_count"] = int(top_k)
+
+    visible_count = int(st.session_state["fridge_visible_count"])
+    query_top_k = max(30, visible_count + 10)
 
     results = model.recommend(
         ingredients_list,
         max_missing_ingredients=int(max_missing),
-        top_k=int(top_k),
+        top_k=query_top_k,
     )
+    visible_results = results[:visible_count]
 
-    if not results:
+    if not visible_results:
         st.markdown(
             empty_state_html(
                 "Nessuna ricetta trovata con questi ingredienti e questo vincolo. "
@@ -377,21 +665,114 @@ def render_svuota_frigo() -> None:
         )
         return
 
-    st.caption(f"{len(results)} ricette trovate")
-    for r in results:
+    st.caption(f"{len(visible_results)} ricette trovate")
+    for r in visible_results:
         meta = f"{r['minuti']} min · {r['calorie']} kcal"
+        found_ingredients = r["ingredienti_trovati"]
+        missing_ingredients = r["ingredienti_mancanti"]
+        match_pct = calculate_match_pct(found_ingredients, missing_ingredients)
+        is_ready = len(missing_ingredients) == 0
+        recipe_ingredients, recipe_steps = get_recipe_details(model, r["id"])
         st.markdown(
             recipe_card_html(
                 name=r["name"].title(),
                 meta=meta,
                 score_label="Similarità",
                 score_value=r["similarity"],
-                pills_have=r["ingredienti_trovati"],
-                pills_missing=r["ingredienti_mancanti"],
-                highlighted=(len(r["ingredienti_mancanti"]) == 0),
+                pills_have=found_ingredients,
+                pills_missing=missing_ingredients,
+                highlighted=is_ready,
+                match_pct=match_pct,
+                ready_badge=is_ready,
             ),
             unsafe_allow_html=True,
         )
+
+        with st.expander("Vedi ingredienti e preparazione"):
+            if not recipe_ingredients or not recipe_steps:
+                st.caption("Dettagli non disponibili per questa ricetta")
+            else:
+                col_ingredients, col_steps = st.columns(2)
+                with col_ingredients:
+                    st.markdown(
+                        '<p style="margin:0 0 10px; color:var(--soft); font-size:0.78rem; '
+                        'font-weight:600; letter-spacing:.08em;">Ingredienti</p>',
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown(
+                        ingredient_pills_html(recipe_ingredients),
+                        unsafe_allow_html=True,
+                    )
+
+                with col_steps:
+                    st.markdown(
+                        '<p style="margin:0 0 10px; color:var(--soft); font-size:0.78rem; '
+                        'font-weight:600; letter-spacing:.08em;">Preparazione</p>',
+                        unsafe_allow_html=True,
+                    )
+                    steps_markdown = "\n".join(
+                        f"{index}. {step}"
+                        for index, step in enumerate(recipe_steps, start=1)
+                    )
+                    st.markdown(steps_markdown)
+
+    if len(results) > visible_count:
+        _, load_more_col, _ = st.columns([1, 1.2, 1])
+        with load_more_col:
+            if st.button(
+                "mostra altre 10 ricette",
+                key="fridge_load_more",
+                use_container_width=True,
+            ):
+                st.session_state["fridge_visible_count"] = visible_count + 10
+                st.rerun()
+
+
+PROFILE_LABELS = {
+    "balanced": "bilanciato",
+    "weight_loss": "perdita di peso",
+    "muscle_gain": "aumento massa",
+}
+
+
+def add_goal_compatibility(results):
+    """Normalizza gli health_score solo dentro il set mostrato."""
+    if not results:
+        return results
+
+    scores = [float(r["health_score"]) for r in results]
+    min_score = min(scores)
+    max_score = max(scores)
+    score_range = max_score - min_score
+
+    enriched_results = []
+    for recipe in results:
+        recipe_with_pct = recipe.copy()
+        if score_range == 0:
+            compatibility_pct = 100
+        else:
+            compatibility_pct = round(
+                ((float(recipe["health_score"]) - min_score) / score_range) * 100
+            )
+        recipe_with_pct["goal_compatibility_pct"] = int(compatibility_pct)
+        enriched_results.append(recipe_with_pct)
+
+    return enriched_results
+
+
+def goal_badge_for(compatibility_pct, profile_name):
+    profile_label = PROFILE_LABELS[profile_name]
+    if compatibility_pct >= 75:
+        quality = "ottima"
+    elif compatibility_pct >= 40:
+        quality = "buona"
+    else:
+        quality = "scarsa"
+
+    return {
+        "label": f"{quality} per {profile_label}",
+        "tone": quality,
+    }
 
 
 def render_salutistico() -> None:
@@ -419,6 +800,10 @@ def render_salutistico() -> None:
             step=50,
             key="health_max_calories",
         )
+        st.markdown(
+            f'<div style="margin-top:-4px; font-size:12px; color:var(--text-muted);">Valore attuale: <strong>{max_calories} kcal</strong></div>',
+            unsafe_allow_html=True,
+        )
         profile_name = st.selectbox(
             "Obiettivo",
             ["balanced", "weight_loss", "muscle_gain"],
@@ -439,10 +824,15 @@ def render_salutistico() -> None:
             step=5,
             key="health_min_protein",
         )
+        st.markdown(
+            f'<div style="margin-top:-4px; font-size:12px; color:var(--text-muted);">Valore attuale: <strong>{min_protein}% DV</strong></div>',
+            unsafe_allow_html=True,
+        )
         diet_tags = st.multiselect(
             "Vincoli dietetici",
             ["vegan", "vegetarian", "gluten-free", "dairy-free", "low-sodium"],
             key="health_diet_tags",
+            placeholder="Seleziona vincoli (opzionale)",
         )
 
     tab1, tab2 = st.tabs(["Singola ricetta", "Piano settimanale"])
@@ -457,13 +847,32 @@ def render_salutistico() -> None:
             key="hb_topk",
         )
 
+        health_params_key = (
+            float(max_calories),
+            float(min_protein),
+            tuple(sorted(diet_tags)),
+            profile_name,
+            int(top_k),
+        )
+        previous_health_params = st.session_state.get("health_previous_params")
+        if previous_health_params != health_params_key:
+            st.session_state["health_visible_count"] = int(top_k)
+            st.session_state["health_previous_params"] = health_params_key
+        elif "health_visible_count" not in st.session_state:
+            st.session_state["health_visible_count"] = int(top_k)
+
+        visible_count = int(st.session_state["health_visible_count"])
+        query_top_k = max(30, visible_count + 10)
+
         results = model.recommend(
             max_calories=max_calories,
             min_protein_pct=min_protein,
             tags_required=diet_tags if diet_tags else None,
             profile_name=profile_name,
-            top_k=int(top_k),
+            top_k=query_top_k,
         )
+
+        results = add_goal_compatibility(results)
 
         if not results:
             st.markdown(
@@ -474,21 +883,89 @@ def render_salutistico() -> None:
                 unsafe_allow_html=True,
             )
         else:
-            st.caption(f"{len(results)} ricette trovate")
-            for r in results:
-                meta = (
-                    f"{r['minuti']} min · {r['calories']} kcal · proteine "
-                    f"{r['protein_pdv']}% DV · grassi {r['fat_pdv']}% DV"
+            sort_by = st.selectbox(
+                "Ordina per",
+                ["Compatibilità con l'obiettivo", "Calorie", "Proteine"],
+                index=0,
+            )
+            if sort_by == "Compatibilità con l'obiettivo":
+                results = sorted(
+                    results,
+                    key=lambda r: r.get("goal_compatibility_pct", 0),
+                    reverse=True,
                 )
+            elif sort_by == "Calorie":
+                results = sorted(
+                    results,
+                    key=lambda r: float(r.get("calories", 0)),
+                    reverse=False,
+                )
+            else:
+                results = sorted(
+                    results,
+                    key=lambda r: float(r.get("protein_pdv", 0)),
+                    reverse=True,
+                )
+
+            visible_results = results[:visible_count]
+
+            st.caption(f"{len(visible_results)} ricette trovate")
+            for r in visible_results:
+                meta = f"{r['minuti']} min · {r['calories']} kcal"
+                badge_info = goal_badge_for(r["goal_compatibility_pct"], profile_name)
+                ingredients, steps = get_recipe_details(model, r["id"])
                 st.markdown(
                     recipe_card_html(
                         name=r["name"].title(),
                         meta=meta,
-                        score_label="Health score",
-                        score_value=r["health_score"],
+                        score_label="Compatibilità con l'obiettivo",
+                        score_value=f"{r['goal_compatibility_pct']}%",
+                        score_separator=": ",
+                        compat_pct=float(r["goal_compatibility_pct"]),
+                        compat_label=badge_info["label"],
+                        protein_pdv=r["protein_pdv"],
+                        fat_pdv=r["fat_pdv"],
                     ),
                     unsafe_allow_html=True,
                 )
+
+                with st.expander("Vedi ingredienti e preparazione"):
+                    if not ingredients or not steps:
+                        st.caption("Dettagli non disponibili per questa ricetta")
+                    else:
+                        col_ingredients, col_steps = st.columns(2)
+                        with col_ingredients:
+                            st.markdown(
+                                '<p style="margin:0 0 10px; color:var(--soft); font-size:0.78rem; '
+                                'font-weight:600; letter-spacing:.08em;">Ingredienti</p>',
+                                unsafe_allow_html=True,
+                            )
+                            st.markdown(
+                                ingredient_pills_html(ingredients),
+                                unsafe_allow_html=True,
+                            )
+
+                        with col_steps:
+                            st.markdown(
+                                '<p style="margin:0 0 10px; color:var(--soft); font-size:0.78rem; '
+                                'font-weight:600; letter-spacing:.08em;">Preparazione</p>',
+                                unsafe_allow_html=True,
+                            )
+                            steps_markdown = "\n".join(
+                                f"{index}. {step}" for index, step in enumerate(steps, start=1)
+                            )
+                            st.markdown(steps_markdown)
+
+            if len(results) > visible_count:
+                _, load_more_col, _ = st.columns([1, 1.2, 1])
+                with load_more_col:
+                    if st.button(
+                        "mostra altre 10 ricette",
+                        key="health_load_more",
+                        use_container_width=True,
+                    ):
+                        st.session_state["health_visible_count"] = visible_count + 10
+                        st.rerun()
 
     with tab2:
         st.caption(
@@ -620,6 +1097,14 @@ def render_mood() -> None:
         modification=modification,
         top_k=int(top_k),
     )
+    user_vector = {
+        "body": body,
+        "time": time,
+        "taste": taste,
+        "price": price,
+        "mental": mental,
+        "modification": modification,
+    }
 
     if not results:
         st.markdown(
@@ -629,22 +1114,57 @@ def render_mood() -> None:
         return
 
     st.caption(f"{len(results)} ricette più vicine al tuo mood attuale")
-    for r in results:
+    for i, r in enumerate(results):
         scores = r["mood_scores"]
+        ingredients, steps = get_recipe_details(model, r["id"])
         meta = (
             f"{r['minuti']} min · {r['calorie']} kcal · "
-            f"body {scores['body']} · time {scores['time']} · taste {scores['taste']}"
+            f"body {scores['body']} · time {scores['time']} · taste {scores['taste']} · "
+            f"price {scores['price']} · mental {scores['mental']} · mod {scores['modification']}"
         )
-        st.markdown(
-            recipe_card_html(
-                name=r["name"].title(),
-                meta=meta,
-                score_label="Distanza dal tuo mood",
-                score_value=r["distanza_geometrica"],
-                highlighted=(r["distanza_geometrica"] < 2.0),
-            ),
-            unsafe_allow_html=True,
-        )
+        card_col, radar_col = st.columns([3, 2])
+        with card_col:
+            st.markdown(
+                recipe_card_html(
+                    name=r["name"].title(),
+                    meta=meta,
+                    score_label="Affinità col tuo mood",
+                    score_value=f"{int(round(r['affinita_pct']))}%",
+                    highlighted=(r["affinita_pct"] > 70),
+                    ingredients=ingredients,
+                    steps=steps,
+                ),
+                unsafe_allow_html=True,
+            )
+        with radar_col:
+            render_mood_radar(user_vector, scores, key=f"radar_{r['id']}")
+
+        with st.expander("Vedi ingredienti e preparazione"):
+            if not ingredients or not steps:
+                st.caption("Dettagli non disponibili per questa ricetta")
+            else:
+                col_ingredients, col_steps = st.columns(2)
+                with col_ingredients:
+                    st.markdown(
+                        '<p style="margin:0 0 10px; color:var(--soft); font-size:0.78rem; '
+                        'font-weight:600; letter-spacing:.08em;">Ingredienti</p>',
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown(
+                        ingredient_pills_html(ingredients),
+                        unsafe_allow_html=True,
+                    )
+
+                with col_steps:
+                    st.markdown(
+                        '<p style="margin:0 0 10px; color:var(--soft); font-size:0.78rem; '
+                        'font-weight:600; letter-spacing:.08em;">Preparazione</p>',
+                        unsafe_allow_html=True,
+                    )
+                    steps_markdown = "\n".join(
+                        f"{index}. {step}" for index, step in enumerate(steps, start=1)
+                    )
+                    st.markdown(steps_markdown)
 
 
 def render_collaborative() -> None:

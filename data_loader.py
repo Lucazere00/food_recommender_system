@@ -24,6 +24,7 @@ from models.health_based import HealthBasedRecommender
 from models.mood_based import MoodBasedRecommender
 from models.collaborative_filtering import CollaborativeFilteringRecommender
 from models.hybrid_based import HybridRecommender
+from llm import LLMExplainer, LLMIntentParser
 
 
 @st.cache_data(show_spinner=False)
@@ -46,6 +47,17 @@ def get_top_tags(n=150) -> list[str]:
     tags = tags.astype(str).str.strip()
     tags = tags[tags != ""]
     return tags.value_counts().head(n).index.tolist()
+
+
+@st.cache_data(show_spinner=False)
+def get_common_ingredients(df_recipes: pd.DataFrame, top_n=200) -> list[str]:
+    """
+    Restituisce gli ingredienti più frequenti, pronti come suggerimenti input.
+    """
+    ingredients = ensure_list_column(df_recipes["ingredients"]).explode().dropna()
+    ingredients = ingredients.astype(str).str.strip()
+    ingredients = ingredients[ingredients != ""]
+    return ingredients.value_counts().head(top_n).index.tolist()
 
 
 @st.cache_resource(show_spinner=False)
@@ -98,6 +110,16 @@ def get_hybrid_model() -> HybridRecommender:
     mood = get_mood_based_model()
     cf = get_collaborative_filtering_model()
     return HybridRecommender(pop, content, mood, cf, health)
+
+
+@st.cache_resource(show_spinner=False)
+def get_intent_parser() -> LLMIntentParser:
+    return LLMIntentParser()
+
+
+@st.cache_resource(show_spinner=False)
+def get_explainer() -> LLMExplainer:
+    return LLMExplainer()
 
 
 def parse_user_id(raw_value: str):

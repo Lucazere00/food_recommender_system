@@ -101,10 +101,13 @@ def get_css() -> str:
         --bg: {PALETTE["bg"]};
         --sidebar: {PALETTE["bg_sidebar"]};
         --surface: {PALETTE["surface"]};
+        --surface-1: #EEE7DA;
         --border: {PALETTE["border"]};
         --ink: {PALETTE["ink"]};
         --soft: {PALETTE["ink_soft"]};
         --muted: {PALETTE["muted"]};
+        --text-muted: {PALETTE["muted"]};
+        --bg-accent: #EAF3DE;
         --terra: {PALETTE["terracotta"]};
         --terra-dark: {PALETTE["terracotta_dark"]};
         --terra-soft: {PALETTE["terracotta_soft"]};
@@ -571,10 +574,109 @@ def get_css() -> str:
         white-space: nowrap;
     }}
 
+    .ready-badge {{
+        flex: 0 0 auto;
+        padding: 3px 10px;
+        border-radius: 20px;
+        background: var(--bg-accent);
+        color: #0C447C;
+        font-size: 11px;
+        font-weight: 500;
+        white-space: nowrap;
+    }}
+
     .recipe-meta {{
         margin: 0 0 8px;
         color: var(--soft);
         font-size: .85rem;
+    }}
+
+    .health-goal-badge {{
+        flex: 0 0 auto;
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 3px 10px;
+        border-radius: 20px;
+        font-size: 11px;
+        font-weight: 500;
+        white-space: nowrap;
+    }}
+
+    .health-goal-badge.ottima {{
+        background: #FCEBEB;
+        color: #791F1F;
+    }}
+
+    .health-goal-badge.buona {{
+        background: #FAEEDA;
+        color: #633806;
+    }}
+
+    .health-goal-badge.discreta {{
+        background: #EAF3DE;
+        color: #27500A;
+    }}
+
+    .compatibility-badge {{
+        flex: 0 0 auto;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 3px 10px;
+        border-radius: 20px;
+        font-size: 11px;
+        font-weight: 500;
+        white-space: nowrap;
+    }}
+
+    .compatibility-badge .tabler-icon {{
+        width: 12px !important;
+        height: 12px !important;
+    }}
+
+    .compatibility-badge.ottima {{
+        background: #FCEBEB;
+        color: #791F1F;
+    }}
+
+    .compatibility-badge.buona {{
+        background: #FAEEDA;
+        color: #633806;
+    }}
+
+    .compatibility-badge.scarsa {{
+        background: var(--surface-1);
+        color: var(--soft);
+    }}
+
+    .nutrient-bars {{
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+        margin: 8px 0 10px;
+    }}
+
+    .nutrient-bar-labels {{
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 4px;
+        color: var(--text-muted);
+        font-size: 11px;
+        font-weight: 500;
+    }}
+
+    .nutrient-bar-track {{
+        height: 5px;
+        overflow: hidden;
+        border-radius: 20px;
+        background: var(--surface-1);
+    }}
+
+    .nutrient-bar-fill {{
+        height: 100%;
+        border-radius: 20px;
     }}
 
     .recipe-score {{
@@ -600,6 +702,32 @@ def get_css() -> str:
         font-size: 12px;
         font-weight: 500;
         white-space: nowrap;
+    }}
+
+    .match-bar-block {{
+        margin: 10px 0 8px;
+    }}
+
+    .match-bar-labels {{
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 5px;
+        color: var(--text-muted);
+        font-size: 11px;
+        font-weight: 500;
+    }}
+
+    .match-bar-track {{
+        height: 6px;
+        overflow: hidden;
+        border-radius: 20px;
+        background: var(--surface-1);
+    }}
+
+    .match-bar-fill {{
+        height: 100%;
+        border-radius: 20px;
     }}
 
     .load-more-icon-label {{
@@ -629,6 +757,30 @@ def get_css() -> str:
     .pill-ingredient {{
         background: #E3EBE2;
         color: #3B6D11;
+    }}
+
+    .pill-neutral {{
+        background: #F0EBE1;
+        color: var(--ink);
+    }}
+
+    .ai-param-pills {{
+        margin: 10px 0 18px;
+    }}
+
+    .ai-quote {{
+        margin: 0 0 18px;
+        padding: 14px 18px;
+        border-left: 4px solid var(--terra);
+        background: #FFFDF8;
+        color: var(--soft);
+        font-family: "Libre Caslon Display", Georgia, serif;
+        font-size: 1.16rem;
+        line-height: 1.55;
+    }}
+
+    .mode-separator {{
+        margin: 42px 0 22px;
     }}
 
     .pill-missing {{
@@ -806,6 +958,14 @@ def recipe_card_html(
     ingredients=None,
     steps=None,
     vs_average: float | None = None,
+    match_pct: float | None = None,
+    ready_badge: bool = False,
+    goal_badge: dict | None = None,
+    nutrient_bars=None,
+    compat_pct: float | None = None,
+    compat_label: str | None = None,
+    protein_pdv: float | None = None,
+    fat_pdv: float | None = None,
 ) -> str:
     pills_html = ""
     if pills_have:
@@ -825,7 +985,8 @@ def recipe_card_html(
     pills_block = (
         f'<div style="margin-bottom:8px">{pills_html}</div>' if pills_html else ""
     )
-    badge_html = ""
+    badges_html = ""
+    badge_items = []
     if votes_badge:
         numero_voti = int(votes_badge.get("numero_voti", 0))
         if numero_voti >= 200:
@@ -840,21 +1001,55 @@ def recipe_card_html(
             badge_bg = "#FCEBEB"
             badge_color = "#791F1F"
             badge_label = "fiducia bassa"
-        badge_html = (
+        badge_items.append(
             f'<span class="votes-badge" style="background:{badge_bg}; color:{badge_color};">'
             f"{numero_voti} voti · {badge_label}</span>"
+        )
+    if ready_badge:
+        badge_items.append('<span class="ready-badge">pronta subito</span>')
+    if compat_label is not None:
+        compat_tone = ""
+        if compat_pct is not None:
+            if compat_pct >= 75:
+                compat_tone = "ottima"
+            elif compat_pct >= 40:
+                compat_tone = "buona"
+            else:
+                compat_tone = "scarsa"
+        badge_items.append(
+            '<span class="compatibility-badge '
+            f'{compat_tone}">{tabler_icon("ti-flame", size=12)}'
+            f'<span>{escape(str(compat_label))}</span></span>'
+        )
+    elif goal_badge:
+        badge_tone = escape(str(goal_badge.get("tone", "discreta")))
+        badge_label = escape(str(goal_badge.get("label", "")))
+        badge_items.append(
+            f'<span class="health-goal-badge {badge_tone}">{badge_label}</span>'
+        )
+    if badge_items:
+        badges_html = (
+            '<div style="display:flex; gap:8px; align-items:center;">'
+            f"{''.join(badge_items)}</div>"
         )
 
     title_html = (
         '<div class="recipe-card-header">'
         f'<p class="recipe-title">{escape(str(name))}</p>'
-        f"{badge_html}"
+        f"{badges_html}"
         "</div>"
     )
-    score_html = (
-        f'<p class="recipe-score">{escape(str(score_label))}{escape(str(score_separator))}'
-        f"{escape(str(score_value))}</p>"
-    )
+    if compat_pct is not None:
+        score_html = (
+            '<p class="recipe-score">'
+            f"Compatibilità con l'obiettivo: {int(round(float(compat_pct)))}%"
+            "</p>"
+        )
+    else:
+        score_html = (
+            f'<p class="recipe-score">{escape(str(score_label))}{escape(str(score_separator))}'
+            f"{escape(str(score_value))}</p>"
+        )
     if vs_average is not None:
         if vs_average >= 0:
             average_bg = "#EAF3DE"
@@ -871,11 +1066,79 @@ def recipe_card_html(
             f"{escape(average_text)}</span>"
             "</div>"
         )
+    match_bar_html = ""
+    if match_pct is not None:
+        match_pct_clean = max(0, min(100, int(round(float(match_pct)))))
+        if match_pct_clean >= 80:
+            match_color = "#639922"
+        elif match_pct_clean >= 40:
+            match_color = "#EF9F27"
+        else:
+            match_color = "#E24B4A"
+        match_bar_html = (
+            '<div class="match-bar-block">'
+            '<div class="match-bar-labels">'
+            "<span>Corrispondenza ingredienti</span>"
+            f"<span>{match_pct_clean}%</span>"
+            "</div>"
+            '<div class="match-bar-track">'
+            f'<div class="match-bar-fill" style="width:{match_pct_clean}%; background:{match_color};"></div>'
+            "</div>"
+            "</div>"
+        )
+
+    nutrient_bars_html = ""
+    if protein_pdv is not None or fat_pdv is not None:
+        nutrient_entries = []
+        if protein_pdv is not None:
+            nutrient_entries.append(
+                {
+                    "label": "Proteine",
+                    "value": protein_pdv,
+                    "suffix": "% DV",
+                    "color": "#3B6D11",
+                }
+            )
+        if fat_pdv is not None:
+            nutrient_entries.append(
+                {
+                    "label": "Grassi",
+                    "value": fat_pdv,
+                    "suffix": "% DV",
+                    "color": "#B08B3A",
+                }
+            )
+        nutrient_bars = nutrient_entries
+
+    if nutrient_bars:
+        nutrient_items = []
+        for nutrient in nutrient_bars:
+            value = float(nutrient.get("value", 0))
+            max_value = float(nutrient.get("max", 100))
+            width_pct = 0 if max_value == 0 else max(0, min(100, (value / max_value) * 100))
+            label = escape(str(nutrient.get("label", "")))
+            suffix = escape(str(nutrient.get("suffix", "")))
+            color = escape(str(nutrient.get("color", "#639922")))
+            display_value = f"{int(round(value))}{suffix}"
+            nutrient_items.append(
+                '<div class="nutrient-bar">'
+                '<div class="nutrient-bar-labels">'
+                f"<span>{label}</span>"
+                f"<span>{escape(display_value)}</span>"
+                "</div>"
+                '<div class="nutrient-bar-track">'
+                f'<div class="nutrient-bar-fill" style="width:{width_pct:.1f}%; background:{color};"></div>'
+                "</div>"
+                "</div>"
+            )
+        nutrient_bars_html = f'<div class="nutrient-bars">{"".join(nutrient_items)}</div>'
 
     return (
         f'<div class="{css_class}">'
         f"{title_html}"
         f'<p class="recipe-meta">{escape(str(meta))}</p>'
+        f"{match_bar_html}"
+        f"{nutrient_bars_html}"
         f"{pills_block}"
         f"{score_html}"
         "</div>"
@@ -890,6 +1153,49 @@ def ingredient_pills_html(ingredients: list[str]) -> str:
         f'<span class="pill pill-ingredient">{escape(str(ingredient))}</span>'
         for ingredient in ingredients
     )
+
+
+def param_pills_html(
+    mood_dict: dict | None = None,
+    health_dict: dict | None = None,
+    ingredients_list: list[str] | None = None,
+) -> str:
+    """Genera pillole neutre per i parametri estratti dal testo libero."""
+    pills = []
+
+    if ingredients_list:
+        for ingredient in ingredients_list:
+            pills.append(f"ingrediente: {ingredient}")
+
+    if mood_dict:
+        for axis, value in mood_dict.items():
+            pills.append(f"{axis}: {float(value):+.1f}")
+
+    if health_dict:
+        labels = {
+            "max_calories": "max kcal",
+            "min_protein_pct": "proteine min",
+            "tags_required": "tag",
+            "profile_name": "profilo",
+        }
+        for key, value in health_dict.items():
+            if value in (None, [], ""):
+                continue
+            display_value = ", ".join(value) if isinstance(value, list) else value
+            pills.append(f"{labels.get(key, key)}: {display_value}")
+
+    if not pills:
+        pills = ["nessun vincolo esplicito"]
+
+    pills_html = "".join(
+        f'<span class="pill pill-neutral">{escape(str(pill))}</span>'
+        for pill in pills
+    )
+    return f'<div class="ai-param-pills">{pills_html}</div>'
+
+
+def explanation_quote_html(text: str) -> str:
+    return f'<div class="ai-quote">{escape(str(text))}</div>'
 
 
 def model_card_html(

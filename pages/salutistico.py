@@ -35,11 +35,61 @@ st.caption(
 
 model = get_health_based_model()
 
+PROFILE_LABELS = {
+    "balanced": "bilanciato",
+    "weight_loss": "perdita di peso",
+    "muscle_gain": "aumento massa",
+}
+
+
+def add_goal_compatibility(results):
+    """Normalizza gli health_score solo dentro il set mostrato."""
+    if not results:
+        return results
+
+    scores = [float(r["health_score"]) for r in results]
+    min_score = min(scores)
+    max_score = max(scores)
+    score_range = max_score - min_score
+
+    enriched_results = []
+    for recipe in results:
+        recipe_with_pct = recipe.copy()
+        if score_range == 0:
+            compatibility_pct = 100
+        else:
+            compatibility_pct = round(
+                ((float(recipe["health_score"]) - min_score) / score_range) * 100
+            )
+        recipe_with_pct["goal_compatibility_pct"] = int(compatibility_pct)
+        enriched_results.append(recipe_with_pct)
+
+    return enriched_results
+
+
+def goal_badge_for(compatibility_pct, profile_name):
+    profile_label = PROFILE_LABELS[profile_name]
+    if compatibility_pct >= 75:
+        quality = "ottima"
+    elif compatibility_pct >= 40:
+        quality = "buona"
+    else:
+        quality = "scarsa"
+
+    return {
+        "label": f"{quality} per {profile_label}",
+        "tone": quality,
+    }
+
 # --- Vincoli ---
 col1, col2 = st.columns(2)
 
 with col1:
-    max_calories = st.slider("Calorie massime per porzione", 100, 1500, 600, step=50)
+    max_calories = st.slider("Calorie massime per porzione", 100, 1500, 250, step=50)
+    st.markdown(
+        f'<div style="margin-top:-4px; font-size:12px; color:var(--text-muted);">Valore attuale: <strong>{max_calories} kcal</strong></div>',
+        unsafe_allow_html=True,
+    )
     profile_name = st.selectbox(
         "Obiettivo",
         ["balanced", "weight_loss", "muscle_gain"],
@@ -51,10 +101,15 @@ with col1:
     )
 
 with col2:
-    min_protein = st.slider("Proteine minime (% Daily Value)", 0, 100, 20, step=5)
+    min_protein = st.slider("Proteine minime (% Daily Value)", 0, 100, 35, step=5)
+    st.markdown(
+        f'<div style="margin-top:-4px; font-size:12px; color:var(--text-muted);">Valore attuale: <strong>{min_protein}% DV</strong></div>',
+        unsafe_allow_html=True,
+    )
     diet_tags = st.multiselect(
         "Vincoli dietetici",
         ["vegan", "vegetarian", "gluten-free", "dairy-free", "low-sodium"],
+        placeholder="Seleziona vincoli (opzionale)",
     )
 
 tab1, tab2 = st.tabs(["Singola ricetta", "Piano settimanale"])
@@ -73,6 +128,8 @@ with tab1:
         top_k=int(top_k),
     )
 
+    results = add_goal_compatibility(results)
+
     if not results:
         st.markdown(
             empty_state_html(
@@ -82,15 +139,45 @@ with tab1:
             unsafe_allow_html=True,
         )
     else:
+        sort_by = st.selectbox(
+            "Ordina per",
+            ["Compatibilità con l'obiettivo", "Calorie", "Proteine"],
+            index=0,
+        )
+        if sort_by == "Compatibilità con l'obiettivo":
+            results = sorted(
+                results,
+                key=lambda r: r.get("goal_compatibility_pct", 0),
+                reverse=True,
+            )
+        elif sort_by == "Calorie":
+            results = sorted(
+                results,
+                key=lambda r: float(r.get("calories", 0)),
+                reverse=False,
+            )
+        else:
+            results = sorted(
+                results,
+                key=lambda r: float(r.get("protein_pdv", 0)),
+                reverse=True,
+            )
+
         st.caption(f"{len(results)} ricette trovate")
         for r in results:
-            meta = f"{r['minuti']} min · {r['calories']} kcal · proteine {r['protein_pdv']}% DV · grassi {r['fat_pdv']}% DV"
+            meta = f"{r['minuti']} min · {r['calories']} kcal"
+            badge_info = goal_badge_for(r["goal_compatibility_pct"], profile_name)
             st.markdown(
                 recipe_card_html(
                     name=r["name"].title(),
                     meta=meta,
-                    score_label="Health score",
-                    score_value=r["health_score"],
+                    score_label="Compatibilità con l'obiettivo",
+                    score_value=f"{r['goal_compatibility_pct']}%",
+                    score_separator=": ",
+                    compat_pct=float(r["goal_compatibility_pct"]),
+                    compat_label=badge_info["label"],
+                    protein_pdv=r["protein_pdv"],
+                    fat_pdv=r["fat_pdv"],
                 ),
                 unsafe_allow_html=True,
             )

@@ -74,6 +74,15 @@ class HealthBasedRecommender:
 
         return df_filtered
 
+    def get_eligible_ids(self, max_calories=None, min_protein_pct=None,
+                         tags_required=None):
+        if self.df_recipes is None:
+            raise ValueError("Il modello non e strutturato. Chiama .fit() prima.")
+
+        df_candidates = self._apply_hard_constraints(max_calories, min_protein_pct,
+                                                     tags_required)
+        return set(df_candidates['id'].astype(int))
+
     def _calculate_soft_score(self, df_candidates, profile_name='balanced'):
         if df_candidates.empty:
             return df_candidates

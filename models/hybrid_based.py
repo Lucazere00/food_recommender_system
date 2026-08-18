@@ -32,6 +32,11 @@ class HybridRecommender:
     def recommend(self, user_id=None, user_ingredients=None, mood_params=None,
                   health_params=None, weights=None, top_k=10):
 
+        has_hard_health_constraints = bool(health_params) and any(
+            health_params.get(k) is not None
+            for k in ("max_calories", "min_protein_pct", "tags_required")
+        )
+
         # 1. Determinazione automatica dei pesi (Context-Aware)
         if weights is None:
             weights = {
@@ -66,7 +71,9 @@ class HybridRecommender:
                     weights[k] *= 0.5
                 weights['beta_content'] = 0.5
 
-            if health_params and health_params.get('profile_name'):
+            if health_params and (
+                health_params.get('profile_name') or has_hard_health_constraints
+            ):
                 for k in weights:
                     weights[k] *= 0.8
                 weights['delta_health'] = 0.2
@@ -108,8 +115,11 @@ class HybridRecommender:
             except ValueError as e:
                 print(f"   CF fallback per user {user_id}: {e}")
 
-        if health_params and weights['delta_health'] > 0:
-            h_res          = self.health_model.recommend(**health_params, top_k=pool_size)
+        if health_params and (weights['delta_health'] > 0 or has_hard_health_constraints):
+            health_call_params = health_params.copy()
+            if not health_call_params.get('profile_name'):
+                health_call_params['profile_name'] = 'balanced'
+            h_res          = self.health_model.recommend(**health_call_params, top_k=pool_size)
             scores_health  = {r['id']: r['health_score'] for r in h_res}
 
         # 3. Normalizzazione in [0, 1]
@@ -122,6 +132,21 @@ class HybridRecommender:
         # 4. Aggregazione lineare pesata
         all_ids = (set(norm_pop) | set(norm_mood) | set(norm_content) |
                    set(norm_cf) | set(norm_health))
+
+        if has_hard_health_constraints:
+            eligible_ids = self.health_model.get_eligible_ids(
+                max_calories=health_params.get('max_calories'),
+                min_protein_pct=health_params.get('min_protein_pct'),
+                tags_required=health_params.get('tags_required'),
+            )
+            all_ids = all_ids & eligible_ids
+            if not all_ids:
+                if not eligible_ids:
+                    print("Nessuna ricetta trovata con i vincoli specificati.")
+                    return []
+                print("   Nessuna ricetta rispetta i vincoli nutrizionali rigidi "
+                      "insieme agli altri criteri; ripiego solo sui vincoli nutrizionali.")
+                all_ids = eligible_ids
 
         hybrid_scores = []
         for r_id in all_ids:
@@ -152,6 +177,46 @@ class HybridRecommender:
                 'calorie':              round(float(recipe_meta['calories']), 1),
                 'minuti':               int(recipe_meta['minutes'])
             })
+
+        if os.environ.get("HYBRID_DEBUG") and health_params:
+            max_calories = health_params.get('max_calories')
+            min_protein_pct = health_params.get('min_protein_pct')
+            tags_required = health_params.get('tags_required')
+
+            for recipe in output:
+                recipe_id = recipe['id']
+                recipe_meta = self.health_model.df_recipes[
+                    self.health_model.df_recipes['id'] == recipe_id
+                ]
+                if recipe_meta.empty:
+                    continue
+                recipe_meta = recipe_meta.iloc[0]
+
+                if (max_calories is not None and
+                        float(recipe_meta['calories']) > max_calories):
+                    print(
+                        f"HYBRID_DEBUG warning: ricetta {recipe_id} supera "
+                        f"max_calories={max_calories}."
+                    )
+
+                if (min_protein_pct is not None and
+                        float(recipe_meta['protein_pct']) < min_protein_pct):
+                    print(
+                        f"HYBRID_DEBUG warning: ricetta {recipe_id} sotto "
+                        f"min_protein_pct={min_protein_pct}."
+                    )
+
+                if tags_required:
+                    recipe_tags = [t.lower() for t in recipe_meta['tags']]
+                    missing_tags = [
+                        tag for tag in tags_required
+                        if tag.lower().strip() not in recipe_tags
+                    ]
+                    if missing_tags:
+                        print(
+                            f"HYBRID_DEBUG warning: ricetta {recipe_id} senza "
+                            f"tag richiesti {missing_tags}."
+                        )
 
         return output
 
