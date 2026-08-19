@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 import unicodedata
 from typing import Any
@@ -14,12 +13,15 @@ try:
 except ModuleNotFoundError:
     OpenAI = None
 
-try:
-    from config import OPENAI_API_KEY
-except ImportError:
-    OPENAI_API_KEY = ""
+from llm._secrets import resolve_groq_key, resolve_openai_key
 
 logger = logging.getLogger("food_recommender.intent_parser")
+
+GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b"
+GROQ_FALLBACK_MODELS = ("qwen/qwen3.6-27b", "openai/gpt-oss-20b")
+DEFAULT_OPENAI_MODEL = "gpt-4.1-mini"
+SUPPORTED_PROVIDERS = {"openai", "groq", None}
 
 
 EMPTY_INTENT = {
@@ -34,30 +36,98 @@ EMPTY_INTENT = {
 
 MOOD_AXES = {"body", "time", "taste", "price", "mental", "modification"}
 PROFILE_NAMES = {"balanced", "weight_loss", "muscle_gain"}
-PLACEHOLDER_KEYS = {"", "sk-...", "tuo_api_key_qui", "your_api_key_here"}
-
-
-def _resolve_api_key() -> str | None:
-    env_key = os.environ.get("OPENAI_API_KEY", "").strip()
-    if env_key and env_key not in PLACEHOLDER_KEYS:
-        return env_key
-
-    config_key = str(OPENAI_API_KEY or "").strip()
-    if config_key and config_key not in PLACEHOLDER_KEYS:
-        return config_key
-    return None
 
 
 class LLMIntentParser:
     """Estrae ingredienti, mood e vincoli salutistici da testo naturale."""
 
-    def __init__(self, model_name: str = "gpt-4.1-mini"):
+    def __init__(self, model_name: str | None = None, provider: str | None = None):
+        if provider not in SUPPORTED_PROVIDERS:
+            raise ValueError("provider deve essere 'openai', 'groq' oppure None")
+
+        self._provider_forced = provider is not None
+        self._requested_model_name = model_name
+        self._groq_model_fallbacks_tried = set()
+        self.provider = provider
+        self.client = None
         self.model_name = model_name
-        self.api_key = _resolve_api_key()
-        self.client = OpenAI(api_key=self.api_key) if self.api_key and OpenAI else None
+        self.api_key = None
+
+        self.openai_key = resolve_openai_key()
+        self.groq_key = resolve_groq_key()
+
+        chosen_provider = provider
+        if chosen_provider is None:
+            if self.openai_key:
+                chosen_provider = "openai"
+            elif self.groq_key:
+                chosen_provider = "groq"
+
+        self._activate_provider(chosen_provider, prefer_requested_model=True)
+
         self.is_configured = self.client is not None
         self.last_error = None
         self.used_llm_last_call = False
+        if self.provider:
+            logger.info("Provider LLM attivo: %s (modello: %s)", self.provider, self.model_name)
+        else:
+            logger.warning(
+                "Nessun provider LLM configurato (ne OPENAI_API_KEY ne GROQ_API_KEY valide). "
+                "Modalita fallback attiva."
+            )
+
+    def _activate_provider(self, provider: str | None, prefer_requested_model: bool = True) -> bool:
+        self.client = None
+        self.api_key = None
+        self.provider = None
+
+        if OpenAI and provider == "openai" and self.openai_key:
+            self.client = OpenAI(api_key=self.openai_key)
+            self.api_key = self.openai_key
+            self.model_name = (
+                self._requested_model_name if prefer_requested_model and self._requested_model_name
+                else DEFAULT_OPENAI_MODEL
+            )
+            self.provider = "openai"
+        elif OpenAI and provider == "groq" and self.groq_key:
+            self.client = OpenAI(api_key=self.groq_key, base_url=GROQ_BASE_URL)
+            self.api_key = self.groq_key
+            self.model_name = (
+                self._requested_model_name if prefer_requested_model and self._requested_model_name
+                else DEFAULT_GROQ_MODEL
+            )
+            self.provider = "groq"
+
+        self.is_configured = self.client is not None
+        return self.is_configured
+
+    def _should_failover_to_groq(self, exc: Exception) -> bool:
+        if self._provider_forced or self.provider != "openai" or not self.groq_key:
+            return False
+        error_text = f"{exc.__class__.__name__} {exc}".lower()
+        return any(
+            marker in error_text
+            for marker in ("ratelimit", "rate_limit", "rate limit", "insufficient_quota", "quota")
+        )
+
+    def _try_next_groq_model(self, exc: Exception) -> bool:
+        if self.provider != "groq":
+            return False
+        error_text = f"{exc.__class__.__name__} {exc}".lower()
+        if not any(marker in error_text for marker in ("model_not_found", "does not exist", "not found")):
+            return False
+
+        for fallback_model in GROQ_FALLBACK_MODELS:
+            if fallback_model == self.model_name or fallback_model in self._groq_model_fallbacks_tried:
+                continue
+            self._groq_model_fallbacks_tried.add(fallback_model)
+            logger.warning(
+                "Modello Groq '%s' non disponibile; ritento con '%s'.",
+                self.model_name, fallback_model,
+            )
+            self.model_name = fallback_model
+            return True
+        return False
 
     def parse_query(self, user_text: str) -> dict:
         self.used_llm_last_call = False
@@ -116,34 +186,70 @@ Schema esatto:
 """.strip()
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.model_name,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_text},
-                ],
-                temperature=0.0,
-                response_format={"type": "json_object"},
-            )
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_text},
+            ]
+            completion_kwargs = {
+                "model": self.model_name,
+                "messages": messages,
+                "temperature": 0.0,
+            }
+            try:
+                response = self.client.chat.completions.create(
+                    **completion_kwargs,
+                    response_format={"type": "json_object"},
+                )
+            except Exception as response_format_exc:
+                if "response_format" not in str(response_format_exc).lower():
+                    raise
+                logger.warning(
+                    "Provider LLM %s non ha accettato response_format; ritento senza JSON mode.",
+                    self.provider,
+                )
+                response = self.client.chat.completions.create(**completion_kwargs)
             raw_content = response.choices[0].message.content or "{}"
+            try:
+                parsed_content = json.loads(raw_content)
+            except json.JSONDecodeError as json_exc:
+                self.last_error = json_exc.__class__.__name__
+                self.used_llm_last_call = False
+                logger.warning(
+                    "Parsing JSON fallito dalla risposta LLM (%s): %s | input: %r",
+                    json_exc.__class__.__name__, raw_content, user_text,
+                )
+                return self._fallback_parser(user_text)
             self.last_error = None
             self.used_llm_last_call = True
-            logger.info("Chiamata OpenAI riuscita per input: %r -> %s", user_text, raw_content)
-            return self._normalize_intent(json.loads(raw_content))
+            logger.info(
+                "Chiamata LLM riuscita con provider %s per input: %r -> %s",
+                self.provider, user_text, raw_content,
+            )
+            return self._normalize_intent(parsed_content)
         except Exception as exc:
+            if self._should_failover_to_groq(exc) and self._activate_provider("groq", prefer_requested_model=False):
+                logger.warning(
+                    "Provider OpenAI non disponibile per rate limit/quota; ritento con Groq "
+                    "(modello: %s).",
+                    self.model_name,
+                )
+                return self.parse_query(user_text)
+
+            if self._try_next_groq_model(exc):
+                return self.parse_query(user_text)
+
             self.last_error = exc.__class__.__name__
             self.used_llm_last_call = False
             logger.error(
-                "Chiamata OpenAI fallita (%s): %s | input: %r",
-                exc.__class__.__name__, str(exc), user_text,
+                "Chiamata LLM fallita con provider %s (%s): %s | input: %r",
+                self.provider, exc.__class__.__name__, str(exc), user_text,
                 exc_info=True,
             )
             if "model" in str(exc).lower():
                 logger.error(
-                    "Il modello '%s' potrebbe non essere disponibile per questa API "
-                    "key. Prova 'gpt-4o-mini' o verifica i modelli abilitati sul tuo "
-                    "account OpenAI.",
-                    self.model_name,
+                    "Il modello '%s' potrebbe non essere disponibile per il provider %s. "
+                    "Verifica i modelli abilitati per la chiave configurata.",
+                    self.model_name, self.provider,
                 )
             return self._fallback_parser(user_text)
 
@@ -175,11 +281,37 @@ Schema esatto:
             "avoid", "without", "dont", "don't", "nope"
         }
 
-        def _has_negation(phrase: str, window_size: int = 3) -> bool:
-            for match in re.finditer(rf"\b{re.escape(phrase)}\b", text):
+        def _has_negation(phrase: str, window_size: int = 6) -> bool:
+            match_pattern = rf"\b{re.escape(phrase)}\b"
+            if not re.search(match_pattern, text) and " " not in phrase:
+                stem = re.sub(r"[aoei]$", "", phrase)
+                if len(stem) >= 4 and stem != phrase:
+                    match_pattern = rf"\b{re.escape(stem)}[a-z]*\b"
+
+            for match in re.finditer(match_pattern, text):
                 prefix_tokens = text[:match.start()].split()
                 context_tokens = prefix_tokens[-window_size:]
-                if any(token in negation_tokens for token in context_tokens):
+                negation_positions = [
+                    index for index, token in enumerate(context_tokens)
+                    if token in negation_tokens
+                ]
+                if not negation_positions:
+                    continue
+
+                last_negation = negation_positions[-1]
+                boundary_tokens = {
+                    "voglio", "vorrei", "posso", "possiamo", "devo", "deve",
+                    "fammi", "cerco", "qualcosa"
+                }
+                boundary_positions = [
+                    index for index, token in enumerate(context_tokens)
+                    if token in boundary_tokens and index > last_negation
+                ]
+                if boundary_positions:
+                    after_boundary = context_tokens[boundary_positions[-1] + 1:]
+                    scope_tokens = negation_tokens | {"troppo"}
+                    if not any(token in scope_tokens for token in after_boundary):
+                        continue
                     return True
             return False
 
@@ -222,7 +354,7 @@ Schema esatto:
             "mental": {
                 "positive": [
                     "dolce", "desert", "dessert", "sgarro", "treat", "stress", "emotional",
-                    "coccola", "confort", "confortante", "comfort", "comfortante",
+                    "stressato", "stressata", "coccola", "confort", "confortante", "comfort", "comfortante",
                     "mi coccolo", "mi voglio coccolare", "voglio premiarmi", "mi merito"
                 ],
                 "negative": ["detox", "sano", "healthy", "salutare", "nutriente", "light", "diet", "clean"],
@@ -230,23 +362,26 @@ Schema esatto:
             "time": {
                 "positive": [
                     "elaborato", "lento", "slow", "con calma", "cucinare con cura", "per festa",
-                    "weekend", "domani", "special occasion"
+                    "weekend", "domani", "special occasion", "ho tempo", "posso stare ai fornelli"
                 ],
                 "negative": [
                     "veloce", "rapido", "poco tempo", "subito", "quick", "fast", "in fretta",
                     "stanco", "stanca", "busy", "hurry", "no time", "facile", "easy", "fretta",
-                    "di corsa", "corro", "non ho tempo", "poco tempo a disposizione"
+                    "di corsa", "corro", "non ho tempo", "poco tempo a disposizione",
+                    "poco impegnativo", "poco impegnativa", "non ho voglia di stare ai fornelli",
+                    "non ho voglia di cucinare"
                 ],
             },
             "taste": {
                 "positive": [
                     "gustoso", "gustosa", "gustosi", "gustose", "saporito", "saporita", "cremoso", "piccante", "spicy",
-                    "savory", "gourmet", "sfizioso", "speciale", "rich", "intenso", "squisitissimo", "squisitissima", "squisitissimi", "squisitissime"
+                    "speziato", "speziata", "speziati", "speziate", "elegante", "savory", "gourmet", "sfizioso",
+                    "speciale", "rich", "intenso", "squisitissimo", "squisitissima", "squisitissimi", "squisitissime"
                 ],
                 "negative": ["delicato", "semplice", "simple", "bland", "plain", "light"],
             },
             "price": {
-                "positive": ["costoso", "luxury", "ricercato", "fancy", "speciale", "gourmet"],
+                "positive": ["costoso", "costosa", "caro", "cara", "luxury", "ricercato", "fancy", "speciale", "gourmet"],
                 "negative": [
                     "economico", "economica", "budget", "cheap", "low cost", "basso costo",
                     "pochi ingredienti", "svuota frigo", "frigo", "dispensa", "a casa",
@@ -258,9 +393,9 @@ Schema esatto:
             "modification": {
                 "positive": [
                     "sperimentale", "esotico", "fusion", "innovativo", "adventurous",
-                    "ethnic", "strano", "curioso", "avventuroso",
+                    "ethnic", "strano", "curioso", "avventuroso", "sperimentare",
                     "provare qualcosa di nuovo", "cambiare", "uscire dalla routine",
-                    "diverso dal solito"
+                    "diverso dal solito", "non banale"
                 ],
                 "negative": ["classico", "tradizionale", "traditional", "classic", "tipico"],
             },
@@ -272,6 +407,7 @@ Schema esatto:
         )
         if _stem_match("ricco", text) and not any(term in text for term in nutritional_terms):
             mood["taste"] = mood.get("taste", 0.0) + 3.0 * intensifier_multiplier
+            mood["body"] = mood.get("body", 0.0) + 3.0 * intensifier_multiplier
 
         for axis, groups in axis_phrase_sets.items():
             for phrase in groups["positive"]:
@@ -279,18 +415,52 @@ Schema esatto:
             for phrase in groups["negative"]:
                 _apply_phrase(axis, phrase, -3.0 * intensifier_multiplier)
 
-        if any(phrase in text for phrase in ("senza fretta", "senza pressa", "con calma", "cucinare con calma", "senza urgenza", "non in fretta")):
+        if any(phrase in text for phrase in ("senza fretta", "senza pressa", "con calma", "cucinare con calma", "senza urgenza", "non in fretta", "non ho fretta")):
             mood["time"] = max(mood.get("time", 0.0), 3.0 * intensifier_multiplier)
+        if any(phrase in text for phrase in (
+            "non troppo lento", "non troppo lenta", "niente ricette lente", "niente di lento",
+            "non voglio spendere troppo tempo",
+        )) or (
+            "niente di elaborato" in text
+            and not any(phrase in text for phrase in ("senza fretta", "non ho fretta", "con calma"))
+        ):
+            mood["time"] = min(mood.get("time", 0.0), -3.0 * intensifier_multiplier)
 
         if "economico" in text or "economica" in text or "budget" in text or "cheap" in text:
             mood["price"] = mood.get("price", 0.0) - 3.0 * intensifier_multiplier
+        if any(phrase in text for phrase in ("senza spendere troppo", "spendere pochissimo", "non troppo caro", "non troppo cara", "non deve essere costoso", "non deve essere costosa")):
+            mood["price"] = min(mood.get("price", 0.0), -3.0 * intensifier_multiplier)
         if "speciale" in text or "gourmet" in text or "ricercato" in text or "fancy" in text:
             mood["taste"] = mood.get("taste", 0.0) + 3.0 * intensifier_multiplier
 
-        if any(term in text for term in ("detox", "light", "salutare", "healthy", "nutriente")):
+        if "niente sgarri" in text or "niente sgarro" in text:
+            mood["mental"] = min(mood.get("mental", 0.0), -3.0 * intensifier_multiplier)
+
+        healthy_terms = [
+            term
+            for term in ("detox", "light", "salutare", "healthy", "nutriente")
+            if term in text and not _has_negation(term)
+        ]
+        if healthy_terms:
             mood["body"] = min(mood.get("body", 0.0), -3.0)
             mood["mental"] = min(mood.get("mental", 0.0), -3.0)
             intent["profile_name"] = "balanced"
+
+        if re.search(r"\bnon\s+voglio\s+(?:nulla|niente|qualcosa|una\s+cosa)?.{0,24}\bpesant[eaio]?\b", text):
+            mood["body"] = min(mood.get("body", 0.0), -3.0 * intensifier_multiplier)
+        if any(phrase in text for phrase in ("non troppo leggero", "non troppo leggera", "niente di troppo leggero", "niente di troppo leggera")):
+            mood["body"] = max(mood.get("body", 0.0), 3.0 * intensifier_multiplier)
+        if re.search(r"\bnon\s+(?:troppo\s+)?piccant[eaio]?\b", text):
+            mood["taste"] = min(mood.get("taste", 0.0), -3.0 * intensifier_multiplier)
+        if any(phrase in text for phrase in ("niente di troppo speziato", "niente di troppo speziata", "niente di troppo speziati", "niente di troppo speziate")):
+            mood["taste"] = min(mood.get("taste", 0.0), -3.0 * intensifier_multiplier)
+        if "niente di classico" in text or "niente di tradizionale" in text:
+            mood["modification"] = max(mood.get("modification", 0.0), 3.0 * intensifier_multiplier)
+        if "niente di detox" in text or "niente detox" in text:
+            mood["body"] = max(mood.get("body", 0.0), 3.0 * intensifier_multiplier)
+            mood["mental"] = max(mood.get("mental", 0.0), 3.0 * intensifier_multiplier)
+            if intent.get("profile_name") == "balanced":
+                intent["profile_name"] = None
 
         calories_match = re.search(
             r"(?:sotto|meno di|max|massimo|entro|fino a|under|less than|<=|<)\s*(?:le|i|a)?\s*(\d{2,4})\s*(?:k?cal|calorie|cal)\b",
@@ -340,7 +510,7 @@ Schema esatto:
             "onion": ["cipolla", "cipolle", "onion", "onions"],
             "broccoli": ["broccoli", "broccolo"],
             "tofu": ["tofu"],
-            "carrot": ["carota", "carotte", "carrot", "carrots"],
+            "carrot": ["carota", "carote", "carotte", "carrot", "carrots"],
             "spinach": ["spinaci", "spinach"],
             "mushrooms": ["funghi", "mushroom", "mushrooms"],
             "beans": ["fagioli", "beans", "bean"],
@@ -376,25 +546,39 @@ Schema esatto:
             "tomato": ["pomodoro", "pomodori", "pomodoroo", "tomato", "tomatoes"],
             "chicken": ["pollo", "chicken", "chicken breast", "petto di pollo"],
             "garlic": ["aglio", "garlic", "spicchio d aglio"],
+            "cheese": ["formaggio", "formaggi", "cheese"],
         }
 
         def _is_exclusion_match(phrase: str) -> bool:
+            article = r"(?:(?:il|lo|la|i|gli|le|un|una|al|allo|alla|ai|agli|alle)\s+)?"
             patterns = [
-                rf"\bsenza\s+(?:il\s+|la\s+|i\s+|le\s+|un\s+|una\s+)?{re.escape(phrase)}\b",
-                rf"\bevito\s+(?:il\s+|la\s+|i\s+|le\s+|un\s+|una\s+)?{re.escape(phrase)}\b",
-                rf"\bevitar(?:e|ei|e)\s+(?:il\s+|la\s+|i\s+|le\s+|un\s+|una\s+)?{re.escape(phrase)}\b",
-                rf"\bnon\s+mi\s+piace\s+(?:il\s+|la\s+|i\s+|le\s+|un\s+|una\s+)?{re.escape(phrase)}\b",
-                rf"\bnon\s+voglio\s+(?:il\s+|la\s+|i\s+|le\s+|un\s+|una\s+)?{re.escape(phrase)}\b",
-                rf"\ballergico(?:\s+a)?\s+(?:il\s+|la\s+|i\s+|le\s+|un\s+|una\s+)?{re.escape(phrase)}\b",
-                rf"\ballergica(?:\s+a)?\s+(?:il\s+|la\s+|i\s+|le\s+|un\s+|una\s+)?{re.escape(phrase)}\b",
-                rf"\ballergia\s+a\s+(?:il\s+|la\s+|i\s+|le\s+|un\s+|una\s+)?{re.escape(phrase)}\b",
+                rf"\bsenza\s+{article}{re.escape(phrase)}\b",
+                rf"\bevito\s+{article}{re.escape(phrase)}\b",
+                rf"\bevitar(?:e|ei|e)\s+{article}{re.escape(phrase)}\b",
+                rf"\bnon\s+mi\s+piace\s+{article}{re.escape(phrase)}\b",
+                rf"\bnon\s+voglio\s+{article}{re.escape(phrase)}\b",
+                rf"\ballergic[oa](?:\s+a)?\s+{article}{re.escape(phrase)}\b",
+                rf"\ballergia\s+a\s+{article}{re.escape(phrase)}\b",
             ]
-            return any(re.search(pattern, text) for pattern in patterns)
+            if any(re.search(pattern, text) for pattern in patterns):
+                return True
+
+            return False
 
         excluded = []
         for canonical, phrases in exclusion_map.items():
             if any(_is_exclusion_match(phrase) for phrase in phrases):
                 excluded.append(canonical)
+        allergy_match = re.search(r"\b(?:allergic[oa]|allergia)\b(?P<items>.{0,100})", text)
+        if allergy_match:
+            allergy_items = re.split(
+                r"\b(?:vorrei|voglio|fammi|cerco|con|ma|pero|però|senza|sotto|massimo)\b",
+                allergy_match.group("items"),
+                maxsplit=1,
+            )[0]
+            for canonical, phrases in exclusion_map.items():
+                if any(re.search(rf"\b{re.escape(phrase)}\b", allergy_items) for phrase in phrases):
+                    excluded.append(canonical)
         intent["exclude_ingredients"] = sorted(set(excluded)) or None
 
         excluded_canonicals = set(intent["exclude_ingredients"] or [])
@@ -405,6 +589,15 @@ Schema esatto:
             and any(re.search(rf"\b{re.escape(phrase)}\b", text) for phrase in phrases)
         ]
         intent["ingredients"] = sorted(set(ingredients)) or None
+
+        if any(phrase in text for phrase in ("zero voglia di cucinare", "non ho voglia di cucinare", "non voglio cucinare per ore")):
+            mood["time"] = mood.get("time", 0.0) - 3.0 * intensifier_multiplier
+
+        mood = {
+            axis: max(-5.0, min(5.0, value))
+            for axis, value in mood.items()
+            if abs(value) >= 0.1
+        }
 
         if not mood and any(phrase in text for phrase in ("popolari", "piu apprezzate", "più apprezzate", "top rated", "piu votate", "più votate", "migliori")):
             intent["mood"] = None

@@ -16,5 +16,8 @@ SVD_N_FACTORS   = 50
 SVD_N_EPOCHS    = 20
 SVD_LR_ALL      = 0.005
 
+# NON inserire mai una chiave vera qui: questo file è tracciato da git.
+# La chiave va in .streamlit/secrets.toml (ignorato da git) oppure nella
+# variabile d'ambiente OPENAI_API_KEY.
 OPENAI_API_KEY  = ""
-GROQ_API_KEY    = "tuo_api_key_qui"
+GROQ_API_KEY    = ""

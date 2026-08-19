@@ -876,8 +876,6 @@ def render_sidebar(mode: str = "internal") -> None:
         ("svuota_frigo", "pages/svuota_frigo.py", "2 · Svuota-frigo", "salad"),
         ("salutistico", "pages/salutistico.py", "3 · Salutistico", "apple"),
         ("mood", "pages/mood.py", "4 · Mood", "mood-smile"),
-        ("collaborative", "pages/collaborative.py", "5 · Collaborative", "users"),
-        ("hybrid", "pages/hybrid.py", "6 · Ibrido", "puzzle"),
     ]
 
     def set_current_page(page_key: str) -> None:
@@ -924,25 +922,8 @@ def render_sidebar(mode: str = "internal") -> None:
         nav_item(*page_links[3])
         nav_item(*page_links[4])
 
-        st.markdown('<p class="nav-group">Personalizzato</p>', unsafe_allow_html=True)
-        nav_item(*page_links[5])
-        nav_item(*page_links[6])
-
-        st.markdown('<div class="sidebar-spacer"></div>', unsafe_allow_html=True)
-        st.markdown('<div class="sidebar-user-divider"></div>', unsafe_allow_html=True)
-
         if "user_id" not in st.session_state:
             st.session_state.user_id = ""
-
-        st.text_input(
-            "User ID (opzionale)",
-            key="user_id",
-            help=(
-                "Se inserisci un ID utente presente nel dataset, i modelli "
-                "personalizzati useranno la sua cronologia."
-            ),
-            placeholder="es. 8937",
-        )
 
 
 def recipe_card_html(

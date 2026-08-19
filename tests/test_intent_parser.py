@@ -19,6 +19,14 @@ def parser():
             {"body": lambda mood: mood["body"] <= -3.0},
         ),
         (
+            "non voglio nulla di pesante",
+            {"body": lambda mood: mood["body"] < 0},
+        ),
+        (
+            "non voglio una cosa troppo leggera",
+            {"body": lambda mood: mood["body"] > 0},
+        ),
+        (
             "niente di elaborato, non voglio spendere troppo tempo",
             {"time": lambda mood: mood["time"] <= -3.0},
         ),
@@ -27,12 +35,24 @@ def parser():
             {"time": lambda mood: mood["time"] >= 2.0},
         ),
         (
+            "non ho fretta, posso stare ai fornelli",
+            {"time": lambda mood: mood["time"] > 0},
+        ),
+        (
             "molto gustoso e super saporito",
             {"taste": lambda mood: mood["taste"] >= 4.0},
         ),
         (
+            "non troppo piccante, sapori delicati",
+            {"taste": lambda mood: mood["taste"] < 0},
+        ),
+        (
             "davvero salutare e detox",
             {"mental": lambda mood: mood["mental"] <= -3.0},
+        ),
+        (
+            "niente sgarri, qualcosa di sano",
+            {"mental": lambda mood: mood["mental"] < 0, "body": lambda mood: mood["body"] <= 0},
         ),
         (
             "super confortante e coccoloso",
@@ -91,8 +111,79 @@ def parser():
             {"modification": lambda mood: mood["modification"] <= -2.0},
         ),
         (
+            "niente di classico, voglio cambiare",
+            {"modification": lambda mood: mood["modification"] > 0},
+        ),
+        (
+            "sono stressato, voglio pasta cremosa e niente di detox",
+            {
+                "mental": lambda mood: mood["mental"] > 0,
+                "taste": lambda mood: mood["taste"] > 0,
+                "ingredients": lambda ingredients: "pasta" in ingredients,
+            },
+        ),
+        (
+            "ho tempo e voglia di sperimentare, ma deve restare leggero",
+            {
+                "time": lambda mood: mood["time"] > 0,
+                "modification": lambda mood: mood["modification"] > 0,
+                "body": lambda mood: mood["body"] < 0,
+            },
+        ),
+        (
+            "mi sento leggero, voglio qualcosa di fresco e poco impegnativo",
+            {"body": lambda mood: mood["body"] < 0, "time": lambda mood: mood["time"] < 0},
+        ),
+        (
+            "oggi voglio comfort food ricco ma non troppo lento",
+            {
+                "body": lambda mood: mood["body"] > 0,
+                "mental": lambda mood: mood["mental"] > 0,
+                "time": lambda mood: mood["time"] < 0,
+            },
+        ),
+        (
+            "non ho voglia di stare ai fornelli, ma voglio un gusto intenso",
+            {"time": lambda mood: mood["time"] < 0, "taste": lambda mood: mood["taste"] > 0},
+        ),
+        (
+            "voglio sapori delicati, niente di troppo speziato",
+            {"taste": lambda mood: mood["taste"] < 0},
+        ),
+        (
+            "qualcosa di elegante ma senza spendere troppo",
+            {"taste": lambda mood: mood["taste"] > 0, "price": lambda mood: mood["price"] < 0},
+        ),
+        (
+            "non deve essere costoso, però voglio una ricetta speciale",
+            {"price": lambda mood: mood["price"] < 0, "taste": lambda mood: mood["taste"] > 0},
+        ),
+        (
+            "ricco, costoso, elaborato e sperimentale",
+            {
+                "body": lambda mood: mood["body"] > 0,
+                "price": lambda mood: mood["price"] > 0,
+                "time": lambda mood: mood["time"] > 0,
+                "modification": lambda mood: mood["modification"] > 0,
+            },
+        ),
+        (
             "vojo una pasta al pomodoroo con pane e formaggio, ma senza pesce",
             {"ingredients": lambda ingredients: "pasta" in ingredients and "tomato" in ingredients, "exclude_ingredients": lambda excluded: "fish" in excluded},
+        ),
+        (
+            "sono allergico al pesce e alle noci, vorrei pasta al pomodoro senza formaggio",
+            {
+                "ingredients": lambda ingredients: set(ingredients) == {"pasta", "tomato"},
+                "exclude_ingredients": lambda excluded: set(excluded) == {"cheese", "fish", "nuts"},
+            },
+        ),
+        (
+            "ho solo riso, uova e carote in dispensa, zero voglia di cucinare per ore",
+            {
+                "ingredients": lambda ingredients: set(ingredients) == {"carrot", "egg", "rice"},
+                "time": lambda mood: mood["time"] < 0,
+            },
         ),
         (
             "vogli un pranzoo light ma con molta proteina",
@@ -164,6 +255,16 @@ def test_parser_keeps_existing_schema_fields(parser):
         (
             "voglio un piatto ricco e goloso, che si scioglie in bocca",
             lambda intent: intent["mood"].get("taste", 0) > 0,
+        ),
+        (
+            "cena tra amici: qualcosa di molto gustoso e un po' speciale, ma non troppo caro",
+            lambda intent: intent["mood"].get("taste", 0) > 0
+            and intent["mood"].get("price", 0) < 0,
+        ),
+        (
+            "non voglio niente di tradizionale, sorprendimi con sapori speziati",
+            lambda intent: intent["mood"].get("modification", 0) > 0
+            and intent["mood"].get("taste", 0) > 0,
         ),
     ],
 )

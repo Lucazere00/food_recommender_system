@@ -22,7 +22,6 @@ from style import (
     empty_state_html,
     explanation_quote_html,
     ingredient_pills_html,
-    model_card_html,
     param_pills_html,
     popularity_page_css,
     recipe_card_html,
@@ -163,7 +162,13 @@ def normalize_recipe_list(value):
 
 def get_recipe_details(model, recipe_id):
     """Recupera ingredienti e preparazione solo per la ricetta visualizzata."""
-    recipe_row = model.df_recipes.loc[model.df_recipes["id"] == recipe_id]
+    df_recipes = getattr(model, "df_recipes", None)
+    if df_recipes is None and hasattr(model, "pop_model"):
+        df_recipes = getattr(model.pop_model, "df_recipes", None)
+    if df_recipes is None:
+        return [], []
+
+    recipe_row = df_recipes.loc[df_recipes["id"] == recipe_id]
     if recipe_row.empty:
         return [], []
 
@@ -171,10 +176,6 @@ def get_recipe_details(model, recipe_id):
     ingredients = normalize_recipe_list(recipe.get("ingredients"))
     steps = normalize_recipe_list(recipe.get("steps"))
     return ingredients, steps
-
-
-def set_home_query(example_text: str) -> None:
-    st.session_state["home_llm_query"] = example_text
 
 
 def build_home_health_params(intent: dict) -> dict | None:
@@ -225,8 +226,10 @@ def render_home_llm_results(payload: dict) -> None:
         return
 
     st.caption(f"{len(results)} ricette raccomandate")
+    model = get_hybrid_model()
     for index, recipe in enumerate(results):
         meta = f"{recipe['minuti']} min · {recipe['calorie']} kcal"
+        ingredients, steps = get_recipe_details(model, recipe["id"])
         st.markdown(
             recipe_card_html(
                 name=recipe["name"].title(),
@@ -239,6 +242,33 @@ def render_home_llm_results(payload: dict) -> None:
         )
         if index == 0 and explanation:
             st.markdown(explanation_quote_html(explanation), unsafe_allow_html=True)
+
+        with st.expander("Vedi ingredienti e preparazione"):
+            if not ingredients or not steps:
+                st.caption("Dettagli non disponibili per questa ricetta")
+            else:
+                col_ingredients, col_steps = st.columns(2)
+                with col_ingredients:
+                    st.markdown(
+                        '<p style="margin:0 0 10px; color:var(--soft); font-size:0.78rem; '
+                        'font-weight:600; letter-spacing:.08em;">Ingredienti</p>',
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown(
+                        ingredient_pills_html(ingredients),
+                        unsafe_allow_html=True,
+                    )
+
+                with col_steps:
+                    st.markdown(
+                        '<p style="margin:0 0 10px; color:var(--soft); font-size:0.78rem; '
+                        'font-weight:600; letter-spacing:.08em;">Preparazione</p>',
+                        unsafe_allow_html=True,
+                    )
+                    steps_markdown = "\n".join(
+                        f"{step_index}. {step}" for step_index, step in enumerate(steps, start=1)
+                    )
+                    st.markdown(steps_markdown)
 
 
 def render_home() -> None:
@@ -256,11 +286,10 @@ def render_home() -> None:
     )
 
     with st.form("home_llm_form"):
-        user_text = st.text_area(
+        user_text = st.text_input(
             "Richiesta libera",
             key="home_llm_query",
             label_visibility="collapsed",
-            height=154,
             placeholder=(
                 "sono stanco dopo lo studio, voglio qualcosa di veloce e "
                 "confortante, ho pollo e aglio in frigo, sotto le 500 kcal"
@@ -271,30 +300,6 @@ def render_home() -> None:
             type="primary",
             use_container_width=False,
         )
-
-    chip_cols = st.columns(3)
-    examples = [
-        (
-            "stress da esame",
-            "sono sotto stress da esame, voglio qualcosa di veloce e confortante",
-        ),
-        (
-            "detox domenicale",
-            "voglio un pranzo leggero e detox per domenica, sotto le 450 kcal",
-        ),
-        (
-            "cena tra amici",
-            "cena tra amici, qualcosa di gustoso e un po' speciale ma non troppo caro",
-        ),
-    ]
-    for col, (label, text) in zip(chip_cols, examples):
-        with col:
-            st.button(
-                label,
-                key=f"home_example_{label}",
-                on_click=set_home_query,
-                args=(text,),
-            )
 
     if submitted:
         cleaned_text = (user_text or "").strip()
@@ -327,6 +332,7 @@ def render_home() -> None:
                 "explanation": explanation,
                 "llm_configured": parser.is_configured,
                 "used_llm_last_call": parser.used_llm_last_call,
+                "provider": parser.provider,
                 "last_error": parser.last_error,
             }
 
@@ -334,55 +340,17 @@ def render_home() -> None:
     if home_result:
         if home_result.get("llm_configured") and not home_result.get("used_llm_last_call"):
             st.warning(
-                f"L'API OpenAI ha risposto con un errore ({home_result.get('last_error')}); "
+                f"Il provider LLM ha risposto con un errore ({home_result.get('last_error')}); "
                 "sto usando il parser locale di riserva, meno preciso sul linguaggio naturale."
             )
         elif not home_result.get("llm_configured"):
-            st.warning("Modalita AI non disponibile: chiave OPENAI_API_KEY non configurata.")
+            st.warning("Modalita AI non disponibile: nessuna chiave LLM configurata.")
         render_home_llm_results(home_result)
     else:
         st.markdown(
-            empty_state_html("Scrivi cosa ti va e premi «Genera raccomandazione»."),
+            empty_state_html("Scrivi cosa ti va e premi Invio o «Genera raccomandazione»."),
             unsafe_allow_html=True,
         )
-
-    st.markdown(
-        '<div class="mode-separator">'
-        '<p class="eyebrow">Preferisci scegliere tu?</p>'
-        '<p class="home-intro">Naviga i singoli modelli qui sotto.</p>'
-        "</div>",
-        unsafe_allow_html=True,
-    )
-
-    cards = [
-        ("trophy", "Popolari", "Le ricette più votate, pesate con Bayesian Average."),
-        ("salad", "Svuota-frigo", "Ricette dai tuoi ingredienti disponibili."),
-        ("apple", "Salutistico", "Vincoli nutrizionali e piano settimanale."),
-        ("mood-smile", "Mood-based", "Raccomandazioni guidate dalle 6 dimensioni emotive."),
-        ("users", "Collaborative", "SVD sulla cronologia degli utenti."),
-        ("puzzle", "Ibrido", "Combina tutti i modelli con pesi adattivi."),
-    ]
-
-    cards_html = "".join(
-        model_card_html(
-            icon=icon_name,
-            title=title,
-            description=description,
-            icon_name=icon_name,
-        )
-        for icon_name, title, description in cards
-    )
-
-    st.markdown(
-        '<div class="model-grid">'
-        f"{cards_html}"
-        '<div class="model-card model-card-note">'
-        "<p>Naviga dalla barra laterale. Ogni modello è indipendente e "
-        "testabile da solo.</p>"
-        "</div>"
-        "</div>",
-        unsafe_allow_html=True,
-    )
 
 
 def render_popularity() -> None:

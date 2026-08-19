@@ -41,3 +41,10 @@ ENV/
 *.njsproj
 *.sln
 *.swp
+
+# ==========================================
+# STREAMLIT SECRETS & ENV FILES
+# ==========================================
+.streamlit/secrets.toml
+*.env
+.env.local
