@@ -23,6 +23,7 @@ from style import (
     ingredient_pills_html,
 )
 from data_loader import get_content_based_model, get_common_ingredients
+from utils.links import build_foodcom_url
 
 
 PANTRY_INGREDIENTS = ["salt", "olive oil", "onion", "black pepper", "butter", "garlic"]
@@ -204,6 +205,16 @@ else:
                     match_pct=match_pct,
                     ready_badge=is_ready,
                 ),
+                unsafe_allow_html=True,
+            )
+            try:
+                url = build_foodcom_url(r)
+            except Exception:
+                url = "https://www.food.com/"
+            st.markdown(
+                f'<a href="{url}" target="_blank" rel="noopener" '
+                f'style="font-size:13px; color: var(--text-accent);">'
+                f'<i class="ti ti-external-link"></i> Vedi su Food.com</a>',
                 unsafe_allow_html=True,
             )
 

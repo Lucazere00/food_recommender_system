@@ -22,6 +22,7 @@ from style import (
     ingredient_pills_html,
 )
 from data_loader import get_mood_based_model
+from utils.links import build_foodcom_url
 
 
 MOOD_AXES = ["body", "time", "taste", "price", "mental", "modification"]
@@ -192,6 +193,16 @@ else:
                     ingredients=ingredients,
                     steps=steps,
                 ),
+                unsafe_allow_html=True,
+            )
+            try:
+                url = build_foodcom_url(r)
+            except Exception:
+                url = "https://www.food.com/"
+            st.markdown(
+                f'<a href="{url}" target="_blank" rel="noopener" '
+                f'style="font-size:13px; color: var(--text-accent);">'
+                f'<i class="ti ti-external-link"></i> Vedi su Food.com</a>',
                 unsafe_allow_html=True,
             )
         with radar_col:

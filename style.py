@@ -914,7 +914,7 @@ def render_sidebar(mode: str = "internal") -> None:
 
         nav_item(*page_links[0])
 
-        st.markdown('<p class="nav-group">Senza profilo</p>', unsafe_allow_html=True)
+        
         nav_item(*page_links[1])
         nav_item(*page_links[2])
 

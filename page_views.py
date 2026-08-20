@@ -26,6 +26,7 @@ from style import (
     popularity_page_css,
     recipe_card_html,
 )
+from utils.links import build_foodcom_url
 
 
 PAGE_LABELS = {
@@ -234,10 +235,21 @@ def render_home_llm_results(payload: dict) -> None:
             recipe_card_html(
                 name=recipe["name"].title(),
                 meta=meta,
-                score_label="Score ibrido",
+                score_label="Score",
                 score_value=recipe["score_ibrido_finale"],
                 highlighted=index == 0,
             ),
+            unsafe_allow_html=True,
+        )
+        # link esterno a Food.com per la ricetta
+        try:
+            url = build_foodcom_url(recipe)
+        except Exception:
+            url = "https://www.food.com/"
+        st.markdown(
+            f'<a href="{url}" target="_blank" rel="noopener" '
+            f'style="font-size:13px; color: var(--text-accent);">'
+            f'<i class="ti ti-external-link"></i> Vedi su Food.com</a>',
             unsafe_allow_html=True,
         )
         if index == 0 and explanation:
@@ -277,7 +289,6 @@ def render_home() -> None:
 
     st.markdown(
         '<main class="home-shell">'
-        '<p class="eyebrow">Chef AI — sostituisce l\'ibrido</p>'
         '<h1 class="home-title">Cosa cuciniamo oggi?</h1>'
         '<p class="home-intro">Scrivi liberamente: mood, ingredienti disponibili, '
         "vincoli calorici. Il modello capisce e ti propone una ricetta.</p>"
@@ -312,18 +323,48 @@ def render_home() -> None:
                 st.session_state["debug_last_error"] = parser.last_error
                 health_params = build_home_health_params(intent)
                 user_id = parse_user_id(st.session_state.get("user_id", ""))
-                results = get_hybrid_model().recommend(
+                model = get_hybrid_model()
+                results = model.recommend(
                     user_id=user_id,
                     user_ingredients=intent.get("ingredients"),
                     mood_params=intent.get("mood"),
                     health_params=health_params,
                     top_k=5,
                 )
-                explanation = (
-                    get_explainer().generate_explanation(cleaned_text, results[0])
-                    if results
-                    else None
-                )
+
+                # Prepare explainer context: fetch ingredients for the top result
+                explanation = None
+                if results:
+                    top_recipe = results[0].copy()
+                    ingredients, steps = get_recipe_details(model, top_recipe["id"])
+                    top_recipe["ingredients"] = ingredients
+                    normalized_ings = [str(i).lower() for i in ingredients] if ingredients else []
+
+                    # Verify excluded ingredients: only pass exclusions if the caller
+                    # has already checked and the recipe ingredients are available
+                    excluded = intent.get("exclude_ingredients")
+                    verified_exclusions = None
+                    if excluded and ingredients:
+                        # only treat exclusion as verified absent if none of the
+                        # excluded canonicals appear in the ingredient strings
+                        if not any(e in ing for e in excluded for ing in normalized_ings):
+                            verified_exclusions = excluded
+
+                    # ingredient_match: whether any requested ingredient is present
+                    requested_ings = intent.get("ingredients") or []
+                    ingredient_match = None
+                    if requested_ings:
+                        ingredient_match = any(
+                            any(req in str(ing).lower() for ing in normalized_ings)
+                            for req in requested_ings
+                        )
+
+                    explanation = get_explainer().generate_explanation(
+                        cleaned_text,
+                        top_recipe,
+                        excluded_ingredients=verified_exclusions,
+                        ingredient_match=ingredient_match,
+                    )
             st.session_state["home_llm_result"] = {
                 "query": cleaned_text,
                 "intent": intent,
@@ -348,17 +389,14 @@ def render_home() -> None:
         render_home_llm_results(home_result)
     else:
         st.markdown(
-            empty_state_html("Scrivi cosa ti va e premi Invio o «Genera raccomandazione»."),
+            empty_state_html("Scrivi qualcosa e premi Invio o «Genera raccomandazione»."),
             unsafe_allow_html=True,
         )
 
 
 def render_popularity() -> None:
     st.markdown(popularity_page_css(), unsafe_allow_html=True)
-    st.markdown(
-        '<p class="eyebrow">Modello 1 — Nessun login richiesto</p>',
-        unsafe_allow_html=True,
-    )
+    
     st.title("Le ricette più apprezzate")
     st.caption(
         "Punteggio calcolato con Bayesian Average: bilancia il rating medio "
@@ -465,6 +503,16 @@ def render_popularity() -> None:
             ),
             unsafe_allow_html=True,
         )
+        try:
+            url = build_foodcom_url(r)
+        except Exception:
+            url = "https://www.food.com/"
+        st.markdown(
+            f'<a href="{url}" target="_blank" rel="noopener" '
+            f'style="font-size:13px; color: var(--text-accent);">'
+            f'<i class="ti ti-external-link"></i> Vedi su Food.com</a>',
+            unsafe_allow_html=True,
+        )
 
         with st.expander("Vedi ingredienti e preparazione"):
             if not ingredients or not steps:
@@ -517,14 +565,11 @@ def render_popularity() -> None:
 
 
 def render_svuota_frigo() -> None:
-    st.markdown(
-        '<p class="eyebrow">Modello 2 — Content-based su ingredienti</p>',
-        unsafe_allow_html=True,
-    )
+    
     st.title("Cosa hai in frigo?")
     st.caption(
-        "Scrivi o seleziona gli ingredienti disponibili. Il sistema confronta "
-        "il loro vettore TF-IDF con quello di ogni ricetta."
+        "Scrivi o seleziona gli ingredienti disponibili."
+        
     )
 
     model = get_content_based_model()
@@ -655,6 +700,16 @@ def render_svuota_frigo() -> None:
             ),
             unsafe_allow_html=True,
         )
+        try:
+            url = build_foodcom_url(r)
+        except Exception:
+            url = "https://www.food.com/"
+        st.markdown(
+            f'<a href="{url}" target="_blank" rel="noopener" '
+            f'style="font-size:13px; color: var(--text-accent);">'
+            f'<i class="ti ti-external-link"></i> Vedi su Food.com</a>',
+            unsafe_allow_html=True,
+        )
 
         with st.expander("Vedi ingredienti e preparazione"):
             if not recipe_ingredients or not recipe_steps:
@@ -744,10 +799,7 @@ def goal_badge_for(compatibility_pct, profile_name):
 
 
 def render_salutistico() -> None:
-    st.markdown(
-        '<p class="eyebrow">Modello 3 — Constraint-based nutrizionale</p>',
-        unsafe_allow_html=True,
-    )
+    
     st.title("Obiettivi nutrizionali")
     st.caption(
         "I valori percentuali (proteine, grassi, sodio) sono espressi come "
@@ -803,9 +855,9 @@ def render_salutistico() -> None:
             placeholder="Seleziona vincoli (opzionale)",
         )
 
-    tab1, tab2 = st.tabs(["Singola ricetta", "Piano settimanale"])
+    container = st.container()
 
-    with tab1:
+    with container:
         top_k = st.number_input(
             "Quante ricette mostrare",
             min_value=3,
@@ -896,6 +948,16 @@ def render_salutistico() -> None:
                     ),
                     unsafe_allow_html=True,
                 )
+                try:
+                    url = build_foodcom_url(r)
+                except Exception:
+                    url = "https://www.food.com/"
+                st.markdown(
+                    f'<a href="{url}" target="_blank" rel="noopener" '
+                    f'style="font-size:13px; color: var(--text-accent);">'
+                    f'<i class="ti ti-external-link"></i> Vedi su Food.com</a>',
+                    unsafe_allow_html=True,
+                )
 
                 with st.expander("Vedi ingredienti e preparazione"):
                     if not ingredients or not steps:
@@ -935,48 +997,11 @@ def render_salutistico() -> None:
                         st.session_state["health_visible_count"] = visible_count + 10
                         st.rerun()
 
-    with tab2:
-        st.caption(
-            "Genera un piano di 7 giorni campionando senza ripetizioni dalle "
-            "ricette migliori secondo i vincoli impostati sopra."
-        )
-
-        if st.button("Genera piano settimanale", type="primary", key="weekly_plan_btn"):
-            try:
-                plan = model.generate_weekly_plan(
-                    max_calories=max_calories,
-                    min_protein_pct=min_protein,
-                    tags_required=diet_tags if diet_tags else None,
-                    profile_name=profile_name,
-                    days=7,
-                )
-                st.session_state["weekly_plan"] = plan
-            except ValueError as e:
-                st.session_state["weekly_plan"] = None
-                st.markdown(empty_state_html(str(e)), unsafe_allow_html=True)
-
-        plan = st.session_state.get("weekly_plan")
-        if plan:
-            cols = st.columns(7)
-            for col, (day, recipe) in zip(cols, plan.items()):
-                with col:
-                    st.markdown(f"**{day}**")
-                    st.markdown(
-                        recipe_card_html(
-                            name=recipe["name"].title()[:30],
-                            meta=f"{recipe['calories']} kcal",
-                            score_label="Score",
-                            score_value=recipe["health_score"],
-                        ),
-                        unsafe_allow_html=True,
-                    )
+    # Weekly plan feature removed: simplified single-view container used instead of tabs
 
 
 def render_mood() -> None:
-    st.markdown(
-        '<p class="eyebrow">Modello 4 — Sei dimensioni emotive</p>',
-        unsafe_allow_html=True,
-    )
+    
     st.title("Come ti senti oggi?")
     st.caption(
         "Sposta gli slider verso il polo che ti rappresenta di più. "
@@ -1104,6 +1129,16 @@ def render_mood() -> None:
                 ),
                 unsafe_allow_html=True,
             )
+            try:
+                url = build_foodcom_url(r)
+            except Exception:
+                url = "https://www.food.com/"
+            st.markdown(
+                f'<a href="{url}" target="_blank" rel="noopener" '
+                f'style="font-size:13px; color: var(--text-accent);">'
+                f'<i class="ti ti-external-link"></i> Vedi su Food.com</a>',
+                unsafe_allow_html=True,
+            )
         with radar_col:
             render_mood_radar(user_vector, scores, key=f"radar_{r['id']}")
 
@@ -1223,6 +1258,16 @@ def render_collaborative() -> None:
                 score_value=score_value,
                 highlighted=("rating_predetto" in r and r["rating_predetto"] >= 4.5),
             ),
+            unsafe_allow_html=True,
+        )
+        try:
+            url = build_foodcom_url(r)
+        except Exception:
+            url = "https://www.food.com/"
+        st.markdown(
+            f'<a href="{url}" target="_blank" rel="noopener" '
+            f'style="font-size:13px; color: var(--text-accent);">'
+            f'<i class="ti ti-external-link"></i> Vedi su Food.com</a>',
             unsafe_allow_html=True,
         )
 
@@ -1397,6 +1442,16 @@ def render_hybrid() -> None:
                 score_value=r["score_ibrido_finale"],
                 highlighted=True,
             ),
+            unsafe_allow_html=True,
+        )
+        try:
+            url = build_foodcom_url(r)
+        except Exception:
+            url = "https://www.food.com/"
+        st.markdown(
+            f'<a href="{url}" target="_blank" rel="noopener" '
+            f'style="font-size:13px; color: var(--text-accent);">'
+            f'<i class="ti ti-external-link"></i> Vedi su Food.com</a>',
             unsafe_allow_html=True,
         )
 

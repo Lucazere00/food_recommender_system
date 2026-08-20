@@ -15,6 +15,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import streamlit as st
 from style import get_css, recipe_card_html, empty_state_html, render_sidebar
 from data_loader import get_health_based_model
+from utils.links import build_foodcom_url
 
 st.set_page_config(
     page_title="Salutistico — Food Recommender",
@@ -181,6 +182,16 @@ with tab1:
                 ),
                 unsafe_allow_html=True,
             )
+            try:
+                url = build_foodcom_url(r)
+            except Exception:
+                url = "https://www.food.com/"
+            st.markdown(
+                f'<a href="{url}" target="_blank" rel="noopener" '
+                f'style="font-size:13px; color: var(--text-accent);">'
+                f'<i class="ti ti-external-link"></i> Vedi su Food.com</a>',
+                unsafe_allow_html=True,
+            )
 
 # ---------------------------------------------------------------------------
 # TAB 2 — Piano settimanale
@@ -220,3 +231,13 @@ with tab2:
                     ),
                     unsafe_allow_html=True,
                 )
+                        try:
+                            url = build_foodcom_url(recipe)
+                        except Exception:
+                            url = "https://www.food.com/"
+                        st.markdown(
+                            f'<a href="{url}" target="_blank" rel="noopener" '
+                            f'style="font-size:13px; color: var(--text-accent);">'
+                            f'<i class="ti ti-external-link"></i> Vedi su Food.com</a>',
+                            unsafe_allow_html=True,
+                        )

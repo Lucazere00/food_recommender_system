@@ -172,6 +172,12 @@ Esempi:
   Output: {"mood": {"time": -4.0}, "exclude_ingredients": ["fish", "dairy"]}
 - Input: "super gustoso ma non troppo pesante, con pasta e senza pomodori"
   Output: {"ingredients": ["pasta"], "mood": {"taste": 4.0, "body": -3.0}, "exclude_ingredients": ["tomato"]}
+- Input: "sono allergico ai gamberi e al glutine, per favore senza crostacei e senza pasta"
+    Output: {"exclude_ingredients": ["shellfish", "gluten"]}
+- Input: "evito le arachidi e il lattosio"
+    Output: {"exclude_ingredients": ["peanuts", "dairy"]}
+- Input: "niente carne, per favore"
+    Output: {"exclude_ingredients": ["meat"]}
 
 Schema esatto:
 {
@@ -490,7 +496,12 @@ Schema esatto:
             "low-carb": ["low carb", "low-carb", "basso carboidrati", "a basso carboidrati", "carb-free"],
             "sugar-free": ["senza zucchero", "sugar free", "sugar-free", "no sugar"],
         }
-        tags = [tag for tag, phrases in tag_map.items() if any(phrase in text for phrase in phrases)]
+        tags = []
+        for tag, phrases in tag_map.items():
+            for phrase in phrases:
+                if phrase in text and not _has_negation(phrase):
+                    tags.append(tag)
+                    break
         intent["tags_required"] = sorted(set(tags)) or None
 
         ingredient_map = {
@@ -506,7 +517,12 @@ Schema esatto:
             "lentils": ["lenticchie", "lentils", "lentil"],
             "chickpeas": ["ceci", "chickpeas", "chickpea", "fagioli"],
             "salmon": ["salmone", "salmon"],
+            "shrimp": ["gamberi", "gamberetto", "shrimp", "prawns"],
             "beef": ["manzo", "beef", "bistecca"],
+            "pork": ["maiale", "pork"],
+            "turkey": ["tacchino", "turkey"],
+            "lamb": ["agnello", "lamb"],
+            "ham": ["prosciutto", "ham"],
             "onion": ["cipolla", "cipolle", "onion", "onions"],
             "broccoli": ["broccoli", "broccolo"],
             "tofu": ["tofu"],
@@ -528,25 +544,55 @@ Schema esatto:
             "peas": ["piselli", "peas"],
             "cucumber": ["cetriolo", "cucumber", "cucumbers"],
             "avocado": ["avocado", "avocado"],
-            "pepper": ["peperone", "peperoni", "pepper", "peppers"],
+            "bell pepper": ["peperone", "peperoni", "bell pepper"],
+            "black pepper": ["pepe nero", "pepe", "black pepper", "peppercorn"],
             "chili": ["peperoncino", "chili", "chilli"],
             "ginger": ["zenzero", "ginger"],
+            "soy": ["soia", "soy", "tofu", "salsa di soia", "soy sauce"],
             "soy sauce": ["salsa di soia", "soy sauce"],
             "sesame": ["sesamo", "sesame"],
             "eggplant": ["melanzana", "melanzane", "eggplant", "eggplants"],
-            "fish": ["pesce", "fish", "salmon", "tonno", "tuna", "salmone"],
-            "nuts": ["nocciola", "nocciole", "noci", "nut", "nuts"],
-            "dairy": ["latte", "lattosio", "dairy", "cheese", "yogurt", "burro", "cream"],
+            "cod": ["merluzzo", "nasello", "cod"],
+            "squid": ["calamari", "squid"],
+            "mozzarella": ["mozzarella"],
+            "parmesan": ["parmigiano", "parmesan"],
+            "ricotta": ["ricotta"],
+            "basil": ["basilico", "basil"],
+            "parsley": ["prezzemolo", "parsley"],
+            "rosemary": ["rosmarino", "rosemary"],
+            "oregano": ["origano", "oregano"],
+            "flour": ["farina", "flour"],
+            "milk": ["latte", "milk"],
+            "artichoke": ["carciofo", "carciofi", "artichoke"],
+            "asparagus": ["asparagi", "asparagus"],
+            "cauliflower": ["cavolfiore", "cauliflower"],
+            "celery": ["sedano", "celery"],
+            "leek": ["porro", "porri", "leek"],
+            "pumpkin": ["zucca", "pumpkin"],
         }
         exclusion_map = {
             "eggplant": ["melanzana", "melanzane", "eggplant", "eggplants"],
-            "fish": ["pesce", "fish", "salmon", "tonno", "tuna", "salmone"],
-            "nuts": ["nocciola", "nocciole", "noci", "nut", "nuts"],
-            "dairy": ["latte", "lattosio", "dairy", "cheese", "yogurt", "burro", "cream"],
+            "salmon": ["salmone", "salmon"],
+            "tuna": ["tonno", "tuna"],
+            "fish": ["pesce", "fish"],
+            "peanuts": ["arachide", "arachidi", "nocciolina", "noccioline", "peanut", "peanuts"],
+            "nuts": ["nocciola", "nocciole", "noci", "nocciol", "noce", "nut", "nuts"],
+            "egg": ["uovo", "uova", "egg", "eggs"],
+            "dairy": ["dairy", "lattosio"],
+            "cheese": ["formaggio", "formaggi", "cheese"],
+            "butter": ["burro", "butter"],
+            "cream": ["crema", "cream"],
+            "yogurt": ["yogurt", "yogurt greco"],
+            "milk": ["latte", "milk"],
+            "shellfish": ["gamberi", "gamberetti", "scampi", "granchio", "aragosta", "shellfish", "shrimp", "prawns", "crab", "lobster"],
+            "molluscs": ["cozze", "vongole", "calamari", "polpo", "seppia", "mussels", "clams", "squid", "octopus"],
+            "soy": ["soia", "soy", "tofu", "salsa di soia", "soy sauce"],
+            "sesame": ["sesamo", "sesame"],
             "tomato": ["pomodoro", "pomodori", "pomodoroo", "tomato", "tomatoes"],
             "chicken": ["pollo", "chicken", "chicken breast", "petto di pollo"],
             "garlic": ["aglio", "garlic", "spicchio d aglio"],
             "cheese": ["formaggio", "formaggi", "cheese"],
+            "meat": ["carne", "carni", "meat"],
         }
 
         def _is_exclusion_match(phrase: str) -> bool:

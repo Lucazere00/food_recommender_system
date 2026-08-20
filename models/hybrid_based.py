@@ -1,5 +1,6 @@
 import os
 import sys
+import logging
 import pandas as pd
 import numpy as np
 
@@ -14,6 +15,37 @@ class HybridRecommender:
         self.mood_model    = mood_model
         self.cf_model      = cf_model
         self.health_model  = health_model
+        self.logger = logging.getLogger("food_recommender.hybrid")
+
+    @staticmethod
+    def _is_non_food(recipe_meta) -> bool:
+        """Heuristica per identificare item non-food (spray, coating, mix industriale).
+
+        Basata su pattern nel nome e su outlier calories/minutes.
+        """
+        if recipe_meta is None:
+            return False
+        name = str(recipe_meta.get("name", "")).lower()
+        minutes = float(recipe_meta.get("minutes") or recipe_meta.get("minutes", 0) or 0)
+        calories = float(recipe_meta.get("calories") or recipe_meta.get("calories", 0) or 0)
+
+        # name-based patterns
+        non_food_keywords = (
+            "spray", "coating", "pan release", "release", "non-stick",
+            "seasoning mix", "seasoning", "condiment base", "condiment",
+            "bottle", "pack", "can", "aerosol"
+        )
+        if any(kw in name for kw in non_food_keywords):
+            return True
+
+        # statistical outliers: pochissimi minuti ma calorie enormi, oppure calorie praticamente nulle
+        try:
+            if minutes <= 5 and (calories > 1000 or calories < 5):
+                return True
+        except Exception:
+            pass
+
+        return False
 
     def _minmax_scale_dict(self, score_dict, invert=False):
         if not score_dict:
@@ -132,6 +164,46 @@ class HybridRecommender:
         # 4. Aggregazione lineare pesata
         all_ids = (set(norm_pop) | set(norm_mood) | set(norm_content) |
                    set(norm_cf) | set(norm_health))
+
+        # Filter out non-food / product-like items early
+        cleaned_ids = set()
+        for r_id in all_ids:
+            try:
+                recipe_meta = self.pop_model.df_recipes[self.pop_model.df_recipes['id'] == r_id]
+                if recipe_meta.empty:
+                    continue
+                recipe_meta = recipe_meta.iloc[0]
+                if self._is_non_food(recipe_meta):
+                    self.logger.warning("Escludo item non-food dal pool: %s (%s)", r_id, recipe_meta.get('name'))
+                    continue
+                cleaned_ids.add(r_id)
+            except Exception:
+                cleaned_ids.add(r_id)
+        all_ids = cleaned_ids
+
+        # If user requested specific ingredients, apply a hard filter: remove
+        # recipes that do not contain any of the requested ingredients.
+        ingredient_filter_failed = False
+        if user_ingredients:
+            requested = [str(i).lower() for i in (user_ingredients or [])]
+            ids_with_ingredient = set()
+            for r_id in all_ids:
+                row = self.pop_model.df_recipes[self.pop_model.df_recipes['id'] == r_id]
+                if row.empty:
+                    continue
+                row = row.iloc[0]
+                ings = row.get('ingredients') or []
+                # normalize ingredient strings
+                normalized_ings = [str(i).lower() for i in (ings if isinstance(ings, (list, tuple)) else [ings])]
+                if any(any(req in ing for ing in normalized_ings) for req in requested):
+                    ids_with_ingredient.add(r_id)
+
+            if ids_with_ingredient:
+                all_ids = all_ids & ids_with_ingredient
+            else:
+                # Hard filter resulted empty: record failure and proceed without
+                # silently substituting — downstream we will mark ingredient_match=False
+                ingredient_filter_failed = True
 
         if has_hard_health_constraints:
             eligible_ids = self.health_model.get_eligible_ids(

@@ -109,26 +109,80 @@ class LLMExplainer:
             self.model_name = fallback_model
             return True
         return False
+    def generate_explanation(
+        self,
+        original_query: str,
+        recipe: dict,
+        excluded_ingredients: list[str] | None = None,
+        ingredient_match: bool | None = None,
+    ) -> str:
+        """Genera una spiegazione per `recipe`.
 
-    def generate_explanation(self, original_query: str, recipe: dict) -> str:
+        Parametri aggiuntivi:
+        - `excluded_ingredients`: lista di canonical ingredients che il caller ha
+          verificato non essere presenti nella ricetta (passare solo se la
+          verifica e' stata fatta lato codice).
+        - `ingredient_match`: se fornito indica se la ricetta contiene uno
+          degli ingredienti richiesti dall'utente (True/False). Se None,
+          l'LLM non deve assumere nulla sulla presenza dell'ingrediente.
+        """
+
         recipe_name = str(recipe.get("name") or "questa ricetta").title()
         calories = recipe.get("calorie", recipe.get("calories"))
         fallback = self._fallback_explanation(recipe_name, recipe)
         if not self.client:
             return fallback
 
+        # System prompt: vieta esplicitamente qualsiasi affermazione di
+        # sicurezza/assenza di allergeni a meno che non sia fornita nella
+        # struttura dei dati (es. excluded_ingredients verificata dal codice
+        # e ingredients della ricetta disponibili e compatibili).
         system_prompt = (
             "Sei uno chef amichevole italiano. Scrivi 2-3 frasi brevi, calde "
-            "e concrete, spiegando perche la ricetta proposta risponde alla "
-            "richiesta originale dell'utente. Usa solo i dettagli forniti."
+            "e concrete, spiegando perché la ricetta proposta risponde alla "
+            "richiesta originale dell'utente. Usa solo i dettagli forniti. "
+            "NON affermare mai che la ricetta sia priva di un allergene, "
+            "né che sia sicura per una determinata allergia o persona, a meno "
+            "che questa informazione non sia esplicitamente fornita nei campi "
+            "`excluded_ingredients` (verificati dal codice) e nella lista degli "
+            "`ingredients` della ricetta. Se tali informazioni non sono presenti "
+            "e verificate, ometti qualsiasi riferimento a allergie, assenza di "
+            "ingredienti o sicurezza alimentare."
         )
-        user_prompt = (
-            f"Richiesta originale: {original_query}\n"
-            f"Ricetta: {recipe_name}\n"
-            f"Calorie: {calories} kcal\n"
-            f"Tempo: {recipe.get('minuti')} minuti\n"
-            f"Score ibrido: {recipe.get('score_ibrido_finale')}"
-        )
+
+        # Prepara il contesto utente; includiamo `excluded_ingredients` solo se
+        # e' stato verificato e la ricetta contiene una lista di ingredienti
+        # con cui confrontare.
+        user_parts = [
+            f"Richiesta originale: {original_query}",
+            f"Ricetta: {recipe_name}",
+            f"Calorie: {calories} kcal",
+            f"Tempo: {recipe.get('minuti')} minuti",
+            f"Score ibrido: {recipe.get('score_ibrido_finale')}",
+        ]
+
+        verified_exclusions = None
+        recipe_ings = recipe.get("ingredients")
+        if excluded_ingredients and isinstance(recipe_ings, (list, tuple)) and recipe_ings:
+            # normalizza e verifica che nessuna esclusione appaia nella lista
+            normalized_ings = [str(i).lower() for i in recipe_ings]
+            # se qualunque excluded canonical e' presente in ingredient strings,
+            # consideriamo che non sia verificata l'assenza e non esponiamo
+            # excluded_ingredients al modello
+            if any(e in ing for e in excluded_ingredients for ing in normalized_ings):
+                verified_exclusions = None
+            else:
+                verified_exclusions = excluded_ingredients
+
+        if verified_exclusions:
+            user_parts.append(f"Excluded ingredients verified absent: {', '.join(verified_exclusions)}")
+
+        if ingredient_match is True:
+            user_parts.append("Ingredient requested: present in this recipe (verified).")
+        elif ingredient_match is False:
+            user_parts.append("Ingredient requested: NOT present in this recipe (verified). Do not claim presence.")
+
+        user_prompt = "\n".join(user_parts)
 
         try:
             response = self.client.chat.completions.create(
@@ -148,9 +202,9 @@ class LLMExplainer:
                     "(modello: %s).",
                     self.model_name,
                 )
-                return self.generate_explanation(original_query, recipe)
+                return self.generate_explanation(original_query, recipe, excluded_ingredients, ingredient_match)
             if self._try_next_groq_model(exc):
-                return self.generate_explanation(original_query, recipe)
+                return self.generate_explanation(original_query, recipe, excluded_ingredients, ingredient_match)
             return fallback
 
     @staticmethod

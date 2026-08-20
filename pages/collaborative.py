@@ -15,6 +15,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import streamlit as st
 from style import get_css, recipe_card_html, empty_state_html, render_sidebar
+from utils.links import build_foodcom_url
 from data_loader import get_collaborative_filtering_model, get_popularity_model, parse_user_id
 
 st.set_page_config(
@@ -102,5 +103,15 @@ else:
                     score_value=score_value,
                     highlighted=("rating_predetto" in r and r["rating_predetto"] >= 4.5),
                 ),
+                unsafe_allow_html=True,
+            )
+            try:
+                url = build_foodcom_url(r)
+            except Exception:
+                url = "https://www.food.com/"
+            st.markdown(
+                f'<a href="{url}" target="_blank" rel="noopener" '
+                f'style="font-size:13px; color: var(--text-accent);">'
+                f'<i class="ti ti-external-link"></i> Vedi su Food.com</a>',
                 unsafe_allow_html=True,
             )
